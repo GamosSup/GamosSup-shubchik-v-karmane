@@ -3,6 +3,7 @@ import 'guest_store.dart';
 import 'device_calendar.dart';
 import 'bank_import_screen.dart';
 import 'habit_screen.dart';
+import 'finance_plans_screen.dart';
 
 enum PlannerView { all, day, week, month, timeline }
 
@@ -41,7 +42,7 @@ List<Map<String, Object?>> filterPlannerTasks(
   }).toList();
 }
 
-typedef _Entry = ({String title, int cents, String? dueOn, String? project});
+typedef _Entry = ({String title, int cents, String? dueOn, String? project, String? account, String? category});
 
 class GuestScreen extends StatefulWidget {
   const GuestScreen({super.key, required this.store, required this.finance});
@@ -93,7 +94,15 @@ class _GuestScreenState extends State<GuestScreen> {
     );
     if (entry == null || !mounted) return;
     await _save(() {
-      if (widget.finance) return widget.store.addMoney(entry.title, entry.cents);
+      if (widget.finance) {
+        if (row != null) {
+          return widget.store.updateMoneyTags(row['id'] as int, entry.account, entry.category);
+        }
+        return widget.store.addMoney(
+          entry.title, entry.cents, account: entry.account,
+          category: entry.category, recordedOn: plannerDay(DateTime.now()),
+        );
+      }
       if (row == null) {
         return widget.store.addTask(entry.title, dueOn: entry.dueOn, project: entry.project);
       }
@@ -194,6 +203,15 @@ class _GuestScreenState extends State<GuestScreen> {
             ),
           ),
           if (widget.finance) IconButton(
+            tooltip: 'Финансовый план', icon: const Icon(Icons.account_balance_wallet_outlined),
+            onPressed: _saving ? null : () async {
+              await Navigator.of(context).push<void>(MaterialPageRoute(
+                builder: (_) => FinancePlansScreen(store: widget.store),
+              ));
+              if (mounted) _refresh();
+            },
+          ),
+          if (widget.finance) IconButton(
             tooltip: 'Импорт CSV', icon: const Icon(Icons.upload_file),
             onPressed: _saving ? null : () async {
               final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
@@ -242,10 +260,12 @@ class _GuestScreenState extends State<GuestScreen> {
               final details = [row['due_on'], row['project']].whereType<String>().join(' · ');
               return ListTile(
                 title: Text(row['title'] as String),
-                onTap: widget.finance || _saving ? null : () => _edit(row),
-                subtitle: widget.finance ? Text(row['posted_on'] == null
-                    ? formatMoney(row['cents'] as int)
-                    : '${row['posted_on']} · ${formatMoney(row['cents'] as int)}') : details.isEmpty ? null : Text(details),
+                onTap: _saving ? null : () => _edit(row),
+                subtitle: widget.finance ? Text([
+                  formatMoney(row['cents'] as int),
+                  row['posted_on'] ?? row['recorded_on'],
+                  row['account'], row['category'],
+                ].whereType<String>().join(' · ')) : details.isEmpty ? null : Text(details),
                 leading: widget.finance ? null : Checkbox(
                   value: row['done'] == 1,
                   onChanged: _saving ? null : (done) => _save(() async {
@@ -293,6 +313,9 @@ class _EntryDialogState extends State<_EntryDialog> {
   late final _project = TextEditingController(text: widget.initial?['project'] as String?);
   late DateTime? _due = DateTime.tryParse(widget.initial?['due_on'] as String? ?? '');
   final _amount = TextEditingController();
+  late final _account = TextEditingController(text: widget.initial?['account'] as String? ?? (widget.initial == null ? 'Наличные' : ''));
+  late final _category = TextEditingController(text: widget.initial?['category'] as String?);
+  bool get _tagsOnly => widget.finance && widget.initial != null;
   bool _expense = true;
 
   @override
@@ -300,20 +323,22 @@ class _EntryDialogState extends State<_EntryDialog> {
     _title.dispose();
     _amount.dispose();
     _project.dispose();
+    _account.dispose();
+    _category.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.finance ? 'Новая операция' : widget.initial == null ? 'Новая задача' : 'Изменить задачу'),
+      title: Text(widget.finance ? (_tagsOnly ? 'Счёт и категория' : 'Новая операция') : widget.initial == null ? 'Новая задача' : 'Изменить задачу'),
       content: Form(
         key: _form,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextFormField(
-              controller: _title, autofocus: true, maxLength: 120,
+              controller: _title, autofocus: !_tagsOnly, maxLength: 120, readOnly: _tagsOnly,
               decoration: const InputDecoration(labelText: 'Название'),
               validator: (value) => value!.trim().isEmpty ? 'Введите название' : null,
             ),
@@ -340,7 +365,7 @@ class _EntryDialogState extends State<_EntryDialog> {
                 ),
               ]),
             ],
-            if (widget.finance) ...[
+            if (widget.finance && !_tagsOnly) ...[
               TextFormField(
                 controller: _amount,
                 decoration: const InputDecoration(labelText: 'Сумма в рублях'),
@@ -353,6 +378,16 @@ class _EntryDialogState extends State<_EntryDialog> {
                 onChanged: (value) => setState(() => _expense = value),
               ),
             ],
+            if (widget.finance) ...[
+              TextFormField(
+                controller: _account, maxLength: 80,
+                decoration: const InputDecoration(labelText: 'Название счёта'),
+              ),
+              TextFormField(
+                controller: _category, maxLength: 80,
+                decoration: const InputDecoration(labelText: 'Категория', helperText: 'Пустое поле включает автокатегорию'),
+              ),
+            ],
           ],
         ),
       ),
@@ -362,12 +397,17 @@ class _EntryDialogState extends State<_EntryDialog> {
         FilledButton(
           onPressed: () {
             if (!_form.currentState!.validate()) return;
-            final cents = widget.finance ? parseCents(_amount.text)! : 0;
+            final cents = _tagsOnly ? widget.initial!['cents'] as int
+                : widget.finance ? parseCents(_amount.text)! * (_expense ? -1 : 1) : 0;
             final project = _project.text.trim();
+            final account = _account.text.trim();
+            final category = _category.text.trim();
             Navigator.pop(context, (
-              title: _title.text.trim(), cents: _expense ? -cents : cents,
+              title: _title.text.trim(), cents: cents,
               dueOn: _due == null ? null : plannerDay(_due!),
               project: project.isEmpty ? null : project,
+              account: account.isEmpty ? null : account,
+              category: !widget.finance ? null : category.isEmpty ? suggestCategory(_title.text, cents) : category,
             ));
           },
           child: const Text('Сохранить'),
