@@ -40,6 +40,7 @@ class _AccountWorkspaceState extends State<AccountWorkspace> with WidgetsBinding
   late final Timer _timer;
   late final StreamSubscription<AuthState> _authChanges;
   bool _busy = false;
+  bool _editorOpen = false;
   String _status = 'Проверяем синхронизацию…';
   ({SyncState local, Snapshot remote})? _conflict;
 
@@ -93,7 +94,7 @@ class _AccountWorkspaceState extends State<AccountWorkspace> with WidgetsBinding
   }
 
   Future<void> _sync() async {
-    if (!mounted || _busy || !_sameAccount) return;
+    if (!mounted || _busy || _editorOpen || !_sameAccount) return;
     setState(() => _busy = true);
     try {
       final local = await _store.readSyncState();
@@ -195,7 +196,13 @@ class _AccountWorkspaceState extends State<AccountWorkspace> with WidgetsBinding
   }
 
   Future<void> _open(Widget page) async {
-    await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => page));
+    if (_busy || _editorOpen || !_sameAccount) return;
+    _editorOpen = true;
+    try {
+      await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => page));
+    } finally {
+      _editorOpen = false;
+    }
     if (mounted) await _sync();
   }
 
@@ -205,9 +212,9 @@ class _AccountWorkspaceState extends State<AccountWorkspace> with WidgetsBinding
     body: !_sameAccount ? const Center(child: Text('Войдите снова')) : ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        ListTile(title: const Text('Планировщик'), onTap: () => _open(GuestScreen(store: _store, finance: false))),
-        ListTile(title: const Text('Финансы'), onTap: () => _open(GuestScreen(store: _store, finance: true))),
-        ListTile(title: const Text('Мои данные'), onTap: () => _open(DataScreen(store: _store))),
+        ListTile(title: const Text('Планировщик'), onTap: _busy ? null : () => _open(GuestScreen(store: _store, finance: false))),
+        ListTile(title: const Text('Финансы'), onTap: _busy ? null : () => _open(GuestScreen(store: _store, finance: true))),
+        ListTile(title: const Text('Мои данные'), onTap: _busy ? null : () => _open(DataScreen(store: _store))),
         const Divider(),
         Text(_status),
         if (_busy) const LinearProgressIndicator(),
