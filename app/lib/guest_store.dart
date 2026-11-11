@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:sqflite/sqflite.dart';
 
 class GuestStore {
@@ -109,6 +110,8 @@ class GuestStore {
     await db.execute('ALTER TABLE ledger ADD COLUMN account TEXT');
     await db.execute('ALTER TABLE ledger ADD COLUMN category TEXT');
     await db.execute('ALTER TABLE ledger ADD COLUMN recorded_on TEXT');
+    await db.execute('ALTER TABLE ledger ADD COLUMN receipt BLOB');
+    await db.execute('ALTER TABLE ledger ADD COLUMN receipt_name TEXT');
     await db.execute("""
       CREATE TABLE finance_items (
         id INTEGER PRIMARY KEY,
@@ -128,6 +131,25 @@ class GuestStore {
     await (await database).insert('ledger', {
       'title': title, 'cents': cents, 'account': account,
       'category': category, 'recorded_on': recordedOn,
+    });
+  }
+
+  Future<void> setReceipt(int id, String? name, Uint8List? bytes) async {
+    if (bytes != null && (name == null || !validReceipt(name, bytes))) {
+      throw const FormatException('Нужен JPEG, PNG или PDF до 512 КиБ');
+    }
+    final db = await database;
+    await db.transaction((tx) async {
+      if (bytes != null) {
+        final result = await tx.rawQuery(
+          'SELECT COALESCE(SUM(length(receipt)), 0) AS size FROM ledger WHERE id != ?', [id],
+        );
+        if ((result.single['size'] as int) + bytes.length > receiptTotalLimit) {
+          throw const FormatException('Достигнут общий лимит вложений');
+        }
+      }
+      await tx.update('ledger', {'receipt': bytes, 'receipt_name': name},
+        where: 'id = ?', whereArgs: [id]);
     });
   }
 
@@ -317,6 +339,23 @@ String formatMoney(int cents) {
   return '${cents < 0 ? '−' : ''}${value ~/ 100},$fraction ₽';
 }
 
+const receiptFileLimit = 512 * 1024;
+const receiptTotalLimit = 3 * 1024 * 1024;
+
+bool validReceipt(String name, Uint8List bytes) {
+  if (name.length > 120 || RegExp(r'[/\\\x00-\x1f]').hasMatch(name) ||
+      bytes.length < 8 || bytes.length > receiptFileLimit) return false;
+  final lower = name.toLowerCase();
+  if (lower.endsWith('.png')) {
+    const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+    return List.generate(8, (index) => bytes[index] == signature[index]).every((match) => match);
+  }
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+    return bytes[0] == 255 && bytes[1] == 216 && bytes[2] == 255;
+  }
+  return lower.endsWith('.pdf') && String.fromCharCodes(bytes.take(5)) == '%PDF-';
+}
+
 const financeKinds = {'account', 'budget', 'goal', 'debt', 'subscription'};
 
 String suggestCategory(String title, int cents) {
@@ -370,12 +409,17 @@ String encodeBackup(
     if (row['account'] != null) 'account': row['account'],
     if (row['category'] != null) 'category': row['category'],
     if (row['recorded_on'] != null) 'recorded_on': row['recorded_on'],
+    if (row['receipt'] != null) ...{
+      'receipt': base64Encode(row['receipt'] as Uint8List),
+      'receipt_name': row['receipt_name'],
+    },
     if (row['source_key'] != null) ...{
       'source_key': row['source_key'], 'posted_on': row['posted_on'],
     },
   }).toList();
   final finance = financeItems.isNotEmpty || money.any((row) =>
-      row.containsKey('account') || row.containsKey('category') || row.containsKey('recorded_on'));
+      row.containsKey('account') || row.containsKey('category') ||
+      row.containsKey('recorded_on') || row.containsKey('receipt'));
   return jsonEncode({
     'format': 'shubchik-guest',
     'version': finance ? 4 : planner ? 3 : money.any((row) => row.containsKey('source_key')) ? 2 : 1,
@@ -394,6 +438,7 @@ GuestBackup decodeBackup(String text) {
     throw const FormatException('Неизвестный формат резервной копии');
   }
 
+  var receiptBytes = 0;
   List<Map<String, Object?>> rows(String table) {
     final values = data[table];
     if (values is! List || values.length > 50000) {
@@ -443,6 +488,21 @@ GuestBackup decodeBackup(String text) {
             throw const FormatException('Некорректная информация об операции');
           }
           result[key] = value;
+        }
+        final receipt = row['receipt'];
+        final receiptName = row['receipt_name'];
+        if (receipt != null || receiptName != null) {
+          if (data['version'] != 4 || receipt is! String ||
+              receipt.length > ((receiptFileLimit + 2) ~/ 3) * 4 || receiptName is! String) {
+            throw const FormatException('Некорректный чек');
+          }
+          final bytes = base64Decode(receipt);
+          receiptBytes += bytes.length;
+          if (!validReceipt(receiptName, bytes) || receiptBytes > receiptTotalLimit) {
+            throw const FormatException('Некорректный чек или превышен лимит вложений');
+          }
+          result['receipt'] = bytes;
+          result['receipt_name'] = receiptName;
         }
         final source = row['source_key'];
         final date = row['posted_on'];
