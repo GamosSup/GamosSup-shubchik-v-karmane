@@ -18,6 +18,21 @@ if not any(
         root, "uses-permission",
         {f"{{{namespace}}}name": "android.permission.INTERNET"},
     )
+main_activity = application.find("activity")
+assert main_activity is not None
+ET.SubElement(main_activity, "meta-data", {
+    f"{{{namespace}}}name": "flutter_deeplinking_enabled",
+    f"{{{namespace}}}value": "false",
+})
+callback = ET.SubElement(main_activity, "intent-filter")
+ET.SubElement(callback, "action", {f"{{{namespace}}}name": "android.intent.action.VIEW"})
+for category in ("DEFAULT", "BROWSABLE"):
+    ET.SubElement(callback, "category", {f"{{{namespace}}}name": f"android.intent.category.{category}"})
+ET.SubElement(callback, "data", {
+    f"{{{namespace}}}scheme": "io.github.gamossup.shubchik",
+    f"{{{namespace}}}host": "auth",
+    f"{{{namespace}}}path": "/callback",
+})
 queries = root.find("queries")
 if queries is None:
     queries = ET.SubElement(root, "queries")

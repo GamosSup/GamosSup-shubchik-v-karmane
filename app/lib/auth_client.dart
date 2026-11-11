@@ -1,6 +1,8 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+const authRedirect = 'io.github.gamossup.shubchik://auth/callback';
+
 class SecureSessionStorage extends LocalStorage {
   const SecureSessionStorage();
   static const _storage = FlutterSecureStorage();
