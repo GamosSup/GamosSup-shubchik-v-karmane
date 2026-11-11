@@ -26,7 +26,10 @@ ET.SubElement(tts, "action", {f"{{{namespace}}}name": "android.intent.action.TTS
 recognition = ET.SubElement(queries, "intent")
 ET.SubElement(recognition, "action", {f"{{{namespace}}}name": "android.speech.RecognitionService"})
 ET.SubElement(root, "uses-permission", {f"{{{namespace}}}name": "android.permission.RECORD_AUDIO"})
-for permission in ("android.permission.POST_NOTIFICATIONS", "android.permission.RECEIVE_BOOT_COMPLETED"):
+for permission in (
+    "android.permission.POST_NOTIFICATIONS", "android.permission.RECEIVE_BOOT_COMPLETED",
+    "android.permission.READ_CALENDAR",
+):
     ET.SubElement(root, "uses-permission", {f"{{{namespace}}}name": permission})
 receiver = ET.SubElement(application, "receiver", {
     f"{{{namespace}}}name": ".ReminderReceiver",
