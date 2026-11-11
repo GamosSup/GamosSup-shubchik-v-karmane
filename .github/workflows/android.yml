@@ -35,3 +35,22 @@ jobs:
           name: shubchik-debug
           path: app/build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
+      - name: Verify release build with an ephemeral key
+        run: |
+          set -euo pipefail
+          umask 077
+          export SHUBCHIK_SIGNING_KEYSTORE="$RUNNER_TEMP/shubchik-ci.p12"
+          export SHUBCHIK_SIGNING_STORE_PASSWORD="$(openssl rand -hex 24)"
+          echo "::add-mask::$SHUBCHIK_SIGNING_STORE_PASSWORD"
+          export SHUBCHIK_SIGNING_KEY_PASSWORD="$SHUBCHIK_SIGNING_STORE_PASSWORD"
+          export SHUBCHIK_SIGNING_KEY_ALIAS=ci
+          trap 'rm -f -- "$SHUBCHIK_SIGNING_KEYSTORE"' EXIT
+          keytool -genkeypair -storetype PKCS12 -keystore "$SHUBCHIK_SIGNING_KEYSTORE" \
+            -storepass:env SHUBCHIK_SIGNING_STORE_PASSWORD -alias ci \
+            -keyalg RSA -keysize 2048 -validity 2 -dname 'CN=Shubchik CI'
+          python3 tool/configure_signing.py
+          flutter build apk --release
+          signer="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          test -n "$signer"
+          "$signer" verify --print-certs build/app/outputs/flutter-apk/app-release.apk > "$RUNNER_TEMP/shubchik-cert.txt"
+          grep -F 'CN=Shubchik CI' "$RUNNER_TEMP/shubchik-cert.txt"
