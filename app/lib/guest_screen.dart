@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'guest_store.dart';
+import 'bank_import_screen.dart';
 
 class GuestScreen extends StatefulWidget {
   const GuestScreen({super.key, required this.store, required this.finance});
@@ -71,7 +72,20 @@ class _GuestScreenState extends State<GuestScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.finance ? 'Финансы' : 'Планировщик')),
+      appBar: AppBar(
+        title: Text(widget.finance ? 'Финансы' : 'Планировщик'),
+        actions: [
+          if (widget.finance) IconButton(
+            tooltip: 'Импорт CSV', icon: const Icon(Icons.upload_file),
+            onPressed: _saving ? null : () async {
+              final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
+                builder: (_) => BankImportScreen(store: widget.store),
+              ));
+              if (changed == true && mounted) _refresh();
+            },
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
         tooltip: 'Добавить', onPressed: _saving ? null : _add,
         child: const Icon(Icons.add),
@@ -102,7 +116,9 @@ class _GuestScreenState extends State<GuestScreen> {
               final id = row['id'] as int;
               return ListTile(
                 title: Text(row['title'] as String),
-                subtitle: widget.finance ? Text(formatMoney(row['cents'] as int)) : null,
+                subtitle: widget.finance ? Text(row['posted_on'] == null
+                    ? formatMoney(row['cents'] as int)
+                    : '${row['posted_on']} · ${formatMoney(row['cents'] as int)}') : null,
                 leading: widget.finance ? null : Checkbox(
                   value: row['done'] == 1,
                   onChanged: _saving ? null : (done) => _save(() => widget.store.setDone(id, done!)),
