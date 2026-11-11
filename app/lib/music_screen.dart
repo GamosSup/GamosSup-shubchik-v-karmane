@@ -61,6 +61,7 @@ class _MusicScreenState extends State<MusicScreen> {
   late Future<List<Map<String, Object?>>> _tracks;
   bool _busy = false;
   bool _recent = false;
+  String _query = '';
   bool _recommended = false;
   int? _playlist;
   late Future<List<Map<String, Object?>>> _playlists;
@@ -400,10 +401,18 @@ class _MusicScreenState extends State<MusicScreen> {
                 }),
               ),
             ]),
+          TextField(
+            decoration: const InputDecoration(
+              labelText: 'Поиск по названиям файлов',
+              prefixIcon: Icon(Icons.search),
+            ),
+            onChanged: (value) => setState(() => _query = value.trim().toLowerCase()),
+          ),
           if (_busy) const LinearProgressIndicator(),
           if (snapshot.hasError) const Text('Не удалось открыть локальную библиотеку'),
           if (snapshot.hasData)
             for (final (index, track) in snapshot.data!.indexed)
+              if ((track['title'] as String).toLowerCase().contains(_query))
               ListTile(
                 leading: const Icon(Icons.audiotrack),
                 title: Text(track['title'] as String),
@@ -425,6 +434,11 @@ class _MusicScreenState extends State<MusicScreen> {
                   ],
                 ),
               ),
+          if (_query.isNotEmpty &&
+              snapshot.hasData &&
+              !snapshot.data!.any((track) =>
+                  (track['title'] as String).toLowerCase().contains(_query)))
+            const ListTile(title: Text('Ничего не найдено')),
           const Divider(),
           const ListTile(title: Text('Открыть музыкальный сервис')),
           for (final service in const {
