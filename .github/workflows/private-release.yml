@@ -1,0 +1,61 @@
+name: Private Android release draft
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Flutter
+        working-directory: .
+        run: |
+          git clone --depth 1 --branch 3.47.0 https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter create --platforms=android --org io.github.gamossup --no-pub .
+      - run: python3 tool/configure_android.py
+      - name: Build and verify signed APK
+        env:
+          SHUBCHIK_SIGNING_KEYSTORE_B64: ${{ secrets.SHUBCHIK_SIGNING_KEYSTORE_B64 }}
+          SHUBCHIK_SIGNING_STORE_PASSWORD: ${{ secrets.SHUBCHIK_SIGNING_STORE_PASSWORD }}
+          SHUBCHIK_SIGNING_KEY_ALIAS: ${{ secrets.SHUBCHIK_SIGNING_KEY_ALIAS }}
+          SHUBCHIK_SIGNING_KEY_PASSWORD: ${{ secrets.SHUBCHIK_SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$SHUBCHIK_SIGNING_KEYSTORE_B64" || { echo "Signing keystore is missing"; exit 1; }
+          export SHUBCHIK_SIGNING_KEYSTORE="$RUNNER_TEMP/shubchik-signing.jks"
+          trap 'rm -f -- "$SHUBCHIK_SIGNING_KEYSTORE"' EXIT
+          umask 077
+          printf '%s' "$SHUBCHIK_SIGNING_KEYSTORE_B64" | base64 --decode > "$SHUBCHIK_SIGNING_KEYSTORE"
+          python3 tool/configure_signing.py
+          flutter build apk --release
+          signer="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          test -n "$signer"
+          "$signer" verify --print-certs build/app/outputs/flutter-apk/app-release.apk
+      - name: Upload to an unpublished release draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(sed -nE 's/^version: ([0-9]+\.[0-9]+\.[0-9]+)\+.*/\1/p' pubspec.yaml)"
+          test -n "$version"
+          cp build/app/outputs/flutter-apk/app-release.apk "$RUNNER_TEMP/shubchik-$version.apk"
+          gh release create "android-$version" "$RUNNER_TEMP/shubchik-$version.apk" \
+            --draft --target "$GITHUB_SHA" --title "Шубчик в кармане $version" \
+            --notes "Закрытая сборка для приёмки. Черновик GitHub Release."

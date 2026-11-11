@@ -108,7 +108,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
       if (mounted) _setAnswer('Войдите в аккаунт снова');
       return;
     }
-    await widget.store.addTask(title);
+    await widget.store.addTask(title, fromAssistant: true);
     if (mounted) _setAnswer('Задача добавлена');
   }
 

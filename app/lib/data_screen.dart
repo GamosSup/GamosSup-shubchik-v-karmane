@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'guest_store.dart';
+import 'diagnostics_screen.dart';
 
 class DataScreen extends StatefulWidget {
   const DataScreen({super.key, required this.store});
@@ -85,6 +86,12 @@ class _DataScreenState extends State<DataScreen> {
         FilledButton(onPressed: _busy ? null : () => _run(_export), child: const Text('Сохранить резервную копию')),
         OutlinedButton(onPressed: _busy ? null : () => _run(_restore), child: const Text('Восстановить из файла')),
         TextButton(onPressed: _busy ? null : () => _run(_delete), child: const Text('Удалить гостевые данные')),
+        OutlinedButton(
+          onPressed: _busy ? null : () => Navigator.of(context).push<void>(MaterialPageRoute(
+            builder: (_) => DiagnosticsScreen(store: widget.store),
+          )),
+          child: const Text('Диагностика'),
+        ),
         if (_busy) const LinearProgressIndicator(),
         Text(_status, semanticsLabel: _status),
       ],

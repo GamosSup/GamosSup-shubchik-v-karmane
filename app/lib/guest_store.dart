@@ -14,13 +14,14 @@ class GuestStore {
     try {
       return await openDatabase(
         fileName,
-        version: 5,
+        version: 6,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onUpgrade: (db, oldVersion, _) async {
           if (oldVersion < 2) await _createSyncState(db);
           if (oldVersion < 3) await _createBankFields(db);
           if (oldVersion < 4) await _createPlannerFields(db);
           if (oldVersion < 5) await _createFinanceFields(db);
+          if (oldVersion < 6) await _createActivityLog(db);
         },
         onCreate: (db, version) async {
           await _createSyncState(db);
@@ -41,6 +42,7 @@ class GuestStore {
           await _createBankFields(db);
           await _createPlannerFields(db);
           await _createFinanceFields(db);
+          await _createActivityLog(db);
         },
       );
     } catch (_) {
@@ -63,9 +65,42 @@ class GuestStore {
     return name is String && bytes is Uint8List ? (name: name, bytes: bytes) : null;
   }
 
-  Future<void> addTask(String title, {String? dueOn, String? project}) async {
-    await (await database).insert('tasks', {
-      'title': title, 'due_on': dueOn, 'project': project,
+  Future<void> addTask(String title, {
+    String? dueOn, String? project, bool fromAssistant = false,
+  }) async {
+    final db = await database;
+    await db.transaction((tx) async {
+      await tx.insert('tasks', {'title': title, 'due_on': dueOn, 'project': project});
+      if (fromAssistant) await _log(tx, 'assistant_task_added');
+    });
+  }
+
+  Future<void> _createActivityLog(Database db) => db.execute(
+    'CREATE TABLE activity_log (id INTEGER PRIMARY KEY, event TEXT NOT NULL, occurred_at INTEGER NOT NULL)',
+  );
+
+  Future<void> _log(Transaction tx, String event) async {
+    await tx.insert('activity_log', {
+      'event': event, 'occurred_at': DateTime.now().millisecondsSinceEpoch,
+    });
+    await tx.execute('DELETE FROM activity_log WHERE id NOT IN (SELECT id FROM activity_log ORDER BY id DESC LIMIT 100)');
+  }
+
+  Future<Map<String, Object?>> diagnostics() async {
+    final db = await database;
+    return db.transaction((tx) async {
+      final counts = <String, int>{};
+      for (final table in ['tasks', 'ledger', 'habits', 'finance_items']) {
+        final rows = await tx.rawQuery('SELECT COUNT(*) AS count FROM $table');
+        counts[table] = rows.single['count'] as int;
+      }
+      final revision = await tx.query('sync_state', columns: ['revision'], limit: 1);
+      return {
+        'schema': 6,
+        'counts': counts,
+        'cloud_revision': revision.firstOrNull?['revision'] ?? 0,
+        'events': await tx.query('activity_log', columns: ['event', 'occurred_at'], orderBy: 'id DESC'),
+      };
     });
   }
 
@@ -248,7 +283,10 @@ class GuestStore {
   Future<void> restoreBackup(String text) async {
     final backup = decodeBackup(text);
     final db = await database;
-    await db.transaction((tx) => _replace(tx, backup));
+    await db.transaction((tx) async {
+      await _replace(tx, backup);
+      await _log(tx, 'data_restored');
+    });
   }
 
   Future<void> _replace(Transaction tx, GuestBackup backup) async {
@@ -323,7 +361,11 @@ class GuestStore {
 
   Future<void> clear() async {
     final db = await database;
-    await db.transaction(_clearData);
+    await db.transaction((tx) async {
+      await _clearData(tx);
+      await tx.delete('activity_log');
+      await _log(tx, 'data_cleared');
+    });
   }
 
   Future<void> _clearData(Transaction tx) async {
