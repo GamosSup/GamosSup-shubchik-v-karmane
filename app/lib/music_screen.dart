@@ -62,6 +62,12 @@ class _MusicScreenState extends State<MusicScreen> {
   bool _busy = false;
   bool _recent = false;
   String _query = '';
+
+  Future<void> _searchYandex() async {
+    final uri = Uri.https('music.yandex.ru', '/search', {'text': _query});
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && mounted) _message('Не удалось открыть Яндекс Музыку');
+  }
   bool _recommended = false;
   int? _playlist;
   late Future<List<Map<String, Object?>>> _playlists;
@@ -403,16 +409,22 @@ class _MusicScreenState extends State<MusicScreen> {
             ]),
           TextField(
             decoration: const InputDecoration(
-              labelText: 'Поиск по названиям файлов',
+              labelText: 'Поиск в музыке',
               prefixIcon: Icon(Icons.search),
             ),
-            onChanged: (value) => setState(() => _query = value.trim().toLowerCase()),
+            onChanged: (value) => setState(() => _query = value.trim()),
           ),
+          if (_query.isNotEmpty)
+            OutlinedButton.icon(
+              onPressed: _busy ? null : () => _perform(_searchYandex),
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('Искать в Яндекс Музыке'),
+            ),
           if (_busy) const LinearProgressIndicator(),
           if (snapshot.hasError) const Text('Не удалось открыть локальную библиотеку'),
           if (snapshot.hasData)
             for (final (index, track) in snapshot.data!.indexed)
-              if ((track['title'] as String).toLowerCase().contains(_query))
+              if ((track['title'] as String).toLowerCase().contains(_query.toLowerCase()))
               ListTile(
                 leading: const Icon(Icons.audiotrack),
                 title: Text(track['title'] as String),
@@ -437,7 +449,7 @@ class _MusicScreenState extends State<MusicScreen> {
           if (_query.isNotEmpty &&
               snapshot.hasData &&
               !snapshot.data!.any((track) =>
-                  (track['title'] as String).toLowerCase().contains(_query)))
+                  (track['title'] as String).toLowerCase().contains(_query.toLowerCase())))
             const ListTile(title: Text('Ничего не найдено')),
           const Divider(),
           const ListTile(title: Text('Открыть музыкальный сервис')),
