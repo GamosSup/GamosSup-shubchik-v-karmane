@@ -16,7 +16,7 @@ class MusicScreen extends StatefulWidget {
 
 class _MusicScreenState extends State<MusicScreen> {
   final _player = AudioPlayer();
-  late final Future<Database> _library = openDatabase(
+  static final Future<Database> _library = openDatabase(
     'shubchik_music.db',
     version: 1,
     onCreate: (db, _) => db.execute(
@@ -43,16 +43,7 @@ class _MusicScreenState extends State<MusicScreen> {
   void dispose() {
     _sleep?.cancel();
     unawaited(_player.dispose());
-    unawaited(_closeLibrary());
     super.dispose();
-  }
-
-  Future<void> _closeLibrary() async {
-    try {
-      await (await _library).close();
-    } catch (_) {
-      // The open error is displayed by the library list.
-    }
   }
 
   Future<void> _perform(Future<void> Function() action) async {
@@ -118,10 +109,38 @@ class _MusicScreenState extends State<MusicScreen> {
     }
   }
 
+  Future<void> _pauseForTimer() async {
+    try {
+      await _player.pause();
+    } catch (_) {
+      if (mounted) _message('Не удалось поставить музыку на паузу');
+    }
+  }
+
+  Future<void> _remove(Map<String, Object?> track) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить аудиофайл из приложения?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Отмена')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Удалить')),
+        ],
+      ),
+    );
+    if (!mounted || ok != true) return;
+    await _player.stop();
+    if (mounted) setState(() => _title = null);
+    final file = File(track['file_path'] as String);
+    if (await file.exists()) await file.delete();
+    await (await _library).delete('tracks', where: 'id = ?', whereArgs: [track['id']]);
+    if (mounted) setState(() => _tracks = _load());
+  }
+
   void _setSleep(int minutes) {
     _sleep?.cancel();
     _sleep = minutes == 0 ? null : Timer(Duration(minutes: minutes), () {
-      if (mounted) unawaited(_perform(_player.pause));
+      if (mounted) unawaited(_pauseForTimer());
     });
     _message(minutes == 0 ? 'Таймер отключён' : 'Пауза через $minutes мин');
   }
@@ -189,6 +208,10 @@ class _MusicScreenState extends State<MusicScreen> {
                 leading: const Icon(Icons.audiotrack),
                 title: Text(track['title'] as String),
                 onTap: _busy ? null : () => _perform(() => _start(track)),
+                trailing: IconButton(
+                  tooltip: 'Удалить аудио', icon: const Icon(Icons.delete_outline),
+                  onPressed: _busy ? null : () => _perform(() => _remove(track)),
+                ),
               ),
           const Divider(),
           const ListTile(title: Text('Открыть музыкальный сервис')),
