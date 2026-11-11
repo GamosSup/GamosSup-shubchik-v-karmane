@@ -195,8 +195,8 @@ class _PoetryScreenState extends State<PoetryScreen> {
           ],
         );
         final first = poem.lines.first;
-        final lastSpace = first.lastIndexOf(' ');
-        final missing = first.substring(lastSpace + 1);
+        final lastWord = RegExp(r'[a-zA-Zа-яА-ЯёЁ]+(?=[^a-zA-Zа-яА-ЯёЁ]*$)').firstMatch(first)!;
+        final missing = lastWord.group(0)!;
         final expected = step == 2 ? missing : poem.lines[1];
         return ListView(
           padding: const EdgeInsets.all(20),
@@ -229,7 +229,7 @@ class _PoetryScreenState extends State<PoetryScreen> {
             ],
             if (step == 2 || step == 3) ...[
               Text(step == 2 ? 'Вставьте последнее слово' : 'Напишите вторую строку'),
-              Text(step == 2 ? '${first.substring(0, lastSpace)} …' : first),
+              Text(step == 2 ? '${first.substring(0, lastWord.start).trimRight()} …' : first),
               TextField(controller: _answer, enabled: _result == null, decoration: const InputDecoration(labelText: 'Ответ')),
               OutlinedButton(
                 onPressed: _result == null ? () => setState(() {
