@@ -20,7 +20,7 @@ class _DataScreenState extends State<DataScreen> {
     context: context,
     builder: (context) => AlertDialog(
       title: Text(title),
-      content: const Text('Текущие задачи и финансовые записи будут заменены. Сначала сохраните резервную копию.'),
+      content: const Text('Текущие задачи, привычки и финансовые записи будут заменены. Сначала сохраните резервную копию.'),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Отмена')),
         TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Продолжить')),
@@ -80,7 +80,7 @@ class _DataScreenState extends State<DataScreen> {
     body: ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text('Копия содержит задачи и финансовые записи открытым текстом. Храните её в защищённом месте.'),
+        const Text('Копия содержит задачи, привычки и финансовые записи открытым текстом. Храните её в защищённом месте.'),
         const SizedBox(height: 16),
         FilledButton(onPressed: _busy ? null : () => _run(_export), child: const Text('Сохранить резервную копию')),
         OutlinedButton(onPressed: _busy ? null : () => _run(_restore), child: const Text('Восстановить из файла')),
