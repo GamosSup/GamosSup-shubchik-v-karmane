@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'account_screen.dart';
 import 'data_screen.dart';
 import 'guest_screen.dart';
 import 'guest_store.dart';
@@ -45,6 +46,7 @@ class HomeScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          ListTile(title: const Text('Аккаунт'), leading: const Icon(Icons.person), onTap: () => Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => const AccountScreen()))),
           ListTile(title: const Text('Мои данные'), leading: const Icon(Icons.backup), onTap: () => Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => DataScreen(store: _guest)))),
           Text('Гостевой режим · данные на телефоне', style: Theme.of(context).textTheme.titleLarge),
           const ListTile(leading: Icon(Icons.music_note), title: Text('Музыка'), subtitle: Text('В разработке')),
