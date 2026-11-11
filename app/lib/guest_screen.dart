@@ -6,6 +6,8 @@ import 'habit_screen.dart';
 
 enum PlannerView { all, day, week, month, timeline }
 
+enum _TaskAction { calendar, reminder, cancel, delete }
+
 String plannerDay(DateTime value) => value.toIso8601String().substring(0, 10);
 
 List<Map<String, Object?>> filterPlannerTasks(
@@ -152,7 +154,30 @@ class _GuestScreenState extends State<GuestScreen> {
       ),
     );
     if (confirmed == true && mounted) {
-      await _save(() => widget.store.remove(_table, id));
+      await _save(() async {
+        await widget.store.remove(_table, id);
+        if (!widget.finance) await cancelTaskReminder(_reminderKey(id));
+      });
+    }
+  }
+
+  String _reminderKey(int id) => '${widget.store.fileName}:$id';
+
+  Future<void> _taskAction(_TaskAction action, Map<String, Object?> row) async {
+    final id = row['id'] as int;
+    final dueOn = row['due_on'] as String?;
+    switch (action) {
+      case _TaskAction.calendar:
+        await composeCalendarEvent(context, row['title'] as String, dueOn: dueOn);
+      case _TaskAction.reminder:
+        await scheduleTaskReminder(context, _reminderKey(id), dueOn);
+      case _TaskAction.cancel:
+        final cancelled = await cancelTaskReminder(_reminderKey(id));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(cancelled ? 'Напоминание отменено' : 'Не удалось отменить напоминание')),
+        );
+      case _TaskAction.delete:
+        await _remove(id);
     }
   }
 
@@ -223,24 +248,27 @@ class _GuestScreenState extends State<GuestScreen> {
                     : '${row['posted_on']} · ${formatMoney(row['cents'] as int)}') : details.isEmpty ? null : Text(details),
                 leading: widget.finance ? null : Checkbox(
                   value: row['done'] == 1,
-                  onChanged: _saving ? null : (done) => _save(() => widget.store.setDone(id, done!)),
+                  onChanged: _saving ? null : (done) => _save(() async {
+                    await widget.store.setDone(id, done!);
+                    if (done) await cancelTaskReminder(_reminderKey(id));
+                  }),
                 ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (!widget.finance) IconButton(
-                      tooltip: 'Открыть в календаре',
-                      icon: const Icon(Icons.event_available),
-                      onPressed: _saving ? null : () => composeCalendarEvent(
-                        context, row['title'] as String,
+                trailing: widget.finance
+                    ? IconButton(
+                        tooltip: 'Удалить', icon: const Icon(Icons.delete_outline),
+                        onPressed: _saving ? null : () => _remove(id),
+                      )
+                    : PopupMenuButton<_TaskAction>(
+                        tooltip: 'Действия с задачей',
+                        enabled: !_saving,
+                        onSelected: (action) => _taskAction(action, row),
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(value: _TaskAction.calendar, child: Text('Открыть в календаре')),
+                          PopupMenuItem(value: _TaskAction.reminder, child: Text('Напомнить')),
+                          PopupMenuItem(value: _TaskAction.cancel, child: Text('Отменить напоминание')),
+                          PopupMenuItem(value: _TaskAction.delete, child: Text('Удалить')),
+                        ],
                       ),
-                    ),
-                    IconButton(
-                      tooltip: 'Удалить', icon: const Icon(Icons.delete_outline),
-                      onPressed: _saving ? null : () => _remove(id),
-                    ),
-                  ],
-                ),
               );
             },
           );
