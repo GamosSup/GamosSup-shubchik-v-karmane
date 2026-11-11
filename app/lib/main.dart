@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:just_audio_background/just_audio_background.dart';
 
 import 'account_screen.dart';
 import 'assistant_screen.dart';
@@ -11,7 +12,19 @@ import 'guest_store.dart';
 import 'music_screen.dart';
 import 'poetry_screen.dart';
 
-void main() => runApp(const ShubchikApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await JustAudioBackground.init(
+      androidNotificationChannelId: 'io.github.gamossup.shubchik.playback',
+      androidNotificationChannelName: 'Воспроизведение музыки',
+      androidNotificationOngoing: true,
+    );
+  } on PlatformException {
+    // Other modules remain available if the media service cannot start.
+  }
+  runApp(const ShubchikApp());
+}
 
 class ShubchikApp extends StatelessWidget {
   const ShubchikApp({super.key});

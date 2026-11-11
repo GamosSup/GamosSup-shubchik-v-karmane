@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:just_audio_background/just_audio_background.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -15,35 +16,136 @@ class MusicScreen extends StatefulWidget {
 }
 
 class _MusicScreenState extends State<MusicScreen> {
-  final _player = AudioPlayer();
+  static final _equalizer = AndroidEqualizer();
+  static final _player = _createPlayer();
+  static Timer? _sleep;
+
+  static AudioPlayer _createPlayer() {
+    final player = AudioPlayer(audioPipeline: AudioPipeline(androidAudioEffects: [_equalizer]));
+    player.sequenceStateStream.map((state) => state.currentSource?.tag).distinct().listen((tag) async {
+      if (tag is! MediaItem) return;
+      try {
+        await (await _library).update('tracks', {
+          'played_at': DateTime.now().millisecondsSinceEpoch,
+        }, where: 'id = ?', whereArgs: [tag.id]);
+      } catch (_) {
+        // A playback history failure must not stop the current track.
+      }
+    });
+    return player;
+  }
   static final Future<Database> _library = openDatabase(
     'shubchik_music.db',
-    version: 1,
-    onCreate: (db, _) => db.execute(
+    version: 2,
+    onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
+    onUpgrade: (db, old, _) async { if (old < 2) await _createPlaylists(db); },
+    onCreate: (db, _) async {
+      await db.execute(
       'CREATE TABLE tracks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, '
       'file_path TEXT NOT NULL UNIQUE, played_at INTEGER)',
-    ),
+      );
+      await _createPlaylists(db);
+    },
   );
+
+  static Future<void> _createPlaylists(Database db) async {
+    await db.execute('CREATE TABLE playlists (id INTEGER PRIMARY KEY, title TEXT NOT NULL UNIQUE)');
+    await db.execute("""
+      CREATE TABLE playlist_tracks (
+        playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+        track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+        PRIMARY KEY (playlist_id, track_id)
+      )
+    """);
+  }
   late Future<List<Map<String, Object?>>> _tracks;
-  Timer? _sleep;
-  String? _title;
   bool _busy = false;
   bool _recent = false;
+  bool _recommended = false;
+  int? _playlist;
+  late Future<List<Map<String, Object?>>> _playlists;
 
   @override
   void initState() {
     super.initState();
     _tracks = _load();
+    _playlists = _loadPlaylists();
   }
 
-  Future<List<Map<String, Object?>>> _load() async =>
-      (await _library).query('tracks', orderBy: _recent ? 'played_at DESC, id DESC' : 'id DESC');
+  Future<List<Map<String, Object?>>> _load() async {
+    final db = await _library;
+    final playlist = _playlist;
+    if (playlist != null) {
+      return db.rawQuery('''
+        SELECT tracks.* FROM tracks JOIN playlist_tracks ON track_id = tracks.id
+        WHERE playlist_id = ? ORDER BY playlist_tracks.rowid
+      ''', [playlist]);
+    }
+    return db.query('tracks',
+      where: _recent ? 'played_at IS NOT NULL' : null,
+      orderBy: _recent ? 'played_at DESC' : _recommended ? 'played_at ASC, id DESC' : 'id DESC',
+    );
+  }
 
-  @override
-  void dispose() {
-    _sleep?.cancel();
-    unawaited(_player.dispose());
-    super.dispose();
+  Future<List<Map<String, Object?>>> _loadPlaylists() async =>
+      (await _library).query('playlists', orderBy: 'title');
+
+  Future<void> _newPlaylist() async {
+    var title = '';
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Новый плейлист'),
+        content: TextField(
+          autofocus: true, maxLength: 80,
+          onChanged: (value) => title = value.trim(),
+          decoration: const InputDecoration(labelText: 'Название'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Отмена')),
+          FilledButton(onPressed: () {
+            if (title.isNotEmpty) Navigator.pop(context, title);
+          }, child: const Text('Создать')),
+        ],
+      ),
+    );
+    if (!mounted || name == null) return;
+    await (await _library).insert('playlists', {'title': name});
+    if (mounted) setState(() => _playlists = _loadPlaylists());
+  }
+
+  Future<void> _addToPlaylist(int trackId) async {
+    final playlists = await _loadPlaylists();
+    if (!mounted) return;
+    if (playlists.isEmpty) {
+      _message('Сначала создайте плейлист');
+      return;
+    }
+    final id = await showDialog<int>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Добавить в плейлист'),
+        children: [
+          for (final playlist in playlists) SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, playlist['id'] as int),
+            child: Text(playlist['title'] as String),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || id == null) return;
+    await (await _library).insert('playlist_tracks', {
+      'playlist_id': id, 'track_id': trackId,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    if (mounted) setState(() => _tracks = _load());
+  }
+
+  Future<void> _removeFromPlaylist(int trackId) async {
+    final playlist = _playlist;
+    if (playlist == null) return;
+    await (await _library).delete('playlist_tracks',
+      where: 'playlist_id = ? AND track_id = ?', whereArgs: [playlist, trackId]);
+    if (mounted) setState(() => _tracks = _load());
   }
 
   Future<void> _perform(Future<void> Function() action) async {
@@ -87,17 +189,15 @@ class _MusicScreenState extends State<MusicScreen> {
     if (mounted) setState(() => _tracks = _load());
   }
 
-  Future<void> _start(Map<String, Object?> track) async {
+  Future<void> _start(List<Map<String, Object?>> tracks, int index) async {
     await _player.stop();
-    if (mounted) setState(() => _title = null);
-    await _player.setFilePath(track['file_path'] as String);
-    if (!mounted) return;
-    setState(() => _title = track['title'] as String);
+    await _player.setAudioSources([
+      for (final track in tracks) AudioSource.uri(
+        Uri.file(track['file_path'] as String),
+        tag: MediaItem(id: track['id'].toString(), title: track['title'] as String),
+      ),
+    ], initialIndex: index);
     unawaited(_play());
-    await (await _library).update('tracks', {
-      'played_at': DateTime.now().millisecondsSinceEpoch,
-    }, where: 'id = ?', whereArgs: [track['id']]);
-    if (mounted && _recent) setState(() => _tracks = _load());
   }
 
   Future<void> _play() async {
@@ -130,7 +230,7 @@ class _MusicScreenState extends State<MusicScreen> {
     );
     if (!mounted || ok != true) return;
     await _player.stop();
-    if (mounted) setState(() => _title = null);
+    await _player.clearAudioSources();
     final file = File(track['file_path'] as String);
     if (await file.exists()) await file.delete();
     await (await _library).delete('tracks', where: 'id = ?', whereArgs: [track['id']]);
@@ -140,9 +240,64 @@ class _MusicScreenState extends State<MusicScreen> {
   void _setSleep(int minutes) {
     _sleep?.cancel();
     _sleep = minutes == 0 ? null : Timer(Duration(minutes: minutes), () {
-      if (mounted) unawaited(_pauseForTimer());
+      unawaited(_pauseForTimer());
     });
     _message(minutes == 0 ? 'Таймер отключён' : 'Пауза через $minutes мин');
+  }
+
+  Future<void> _showEqualizer() async {
+    await _equalizer.setEnabled(true);
+    final parameters = await _equalizer.parameters;
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: FractionallySizedBox(
+          heightFactor: 0.75,
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Text('Эквалайзер', style: Theme.of(context).textTheme.titleLarge),
+              for (final band in parameters.bands) StreamBuilder<double>(
+                stream: band.gainStream,
+                initialData: band.gain,
+                builder: (context, snapshot) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${band.centerFrequency.round()} Гц'),
+                    Slider(
+                      min: parameters.minDecibels, max: parameters.maxDecibels,
+                      value: (snapshot.data ?? 0).clamp(parameters.minDecibels, parameters.maxDecibels).toDouble(),
+                      onChanged: (gain) => unawaited(_setGain(band, gain)),
+                    ),
+                  ],
+                ),
+              ),
+              TextButton(
+                onPressed: () async {
+                  try {
+                    await _equalizer.setEnabled(false);
+                    if (context.mounted) Navigator.pop(context);
+                  } catch (_) {
+                    if (mounted) _message('Эквалайзер недоступен');
+                  }
+                },
+                child: const Text('Отключить эквалайзер'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _setGain(AndroidEqualizerBand band, double gain) async {
+    try {
+      await band.setGain(gain);
+    } catch (_) {
+      if (mounted) _message('Настройка частоты недоступна');
+    }
   }
 
   @override
@@ -153,7 +308,14 @@ class _MusicScreenState extends State<MusicScreen> {
       builder: (context, snapshot) => ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text(_title ?? 'Выберите аудиофайл', style: Theme.of(context).textTheme.titleLarge),
+          StreamBuilder(
+            stream: _player.sequenceStateStream,
+            builder: (context, state) {
+              final tag = state.data?.currentSource?.tag;
+              return Text(tag is MediaItem ? tag.title : 'Выберите аудиофайл',
+                style: Theme.of(context).textTheme.titleLarge);
+            },
+          ),
           StreamBuilder<PlayerState>(
             stream: _player.playerStateStream,
             builder: (context, snapshot) {
@@ -164,7 +326,7 @@ class _MusicScreenState extends State<MusicScreen> {
                 children: [
                   IconButton(
                     tooltip: playing ? 'Пауза' : 'Воспроизвести',
-                    onPressed: _title == null || _busy ? null : () {
+                    onPressed: _player.sequence.isEmpty || _busy ? null : () {
                       if (playing) {
                         unawaited(_perform(_player.pause));
                       } else {
@@ -172,6 +334,14 @@ class _MusicScreenState extends State<MusicScreen> {
                       }
                     },
                     icon: Icon(playing ? Icons.pause : Icons.play_arrow),
+                  ),
+                  IconButton(
+                    tooltip: 'Следующая запись', icon: const Icon(Icons.skip_next),
+                    onPressed: _busy || !_player.hasNext ? null : () => _perform(_player.seekToNext),
+                  ),
+                  IconButton(
+                    tooltip: 'Эквалайзер', icon: const Icon(Icons.equalizer),
+                    onPressed: _busy || _player.sequence.isEmpty ? null : () => _perform(_showEqualizer),
                   ),
                   PopupMenuButton<int>(
                     tooltip: 'Таймер сна',
@@ -192,25 +362,67 @@ class _MusicScreenState extends State<MusicScreen> {
             icon: const Icon(Icons.add),
             label: const Text('Добавить аудиофайл'),
           ),
-          SwitchListTile(
-            title: const Text('Недавно прослушанные'),
-            value: _recent,
-            onChanged: (value) => setState(() {
-              _recent = value;
-              _tracks = _load();
-            }),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : () => _perform(_newPlaylist),
+            icon: const Icon(Icons.playlist_add), label: const Text('Создать плейлист'),
           ),
+          FutureBuilder(
+            future: _playlists,
+            builder: (context, state) => DropdownButton<int>(
+              value: _playlist,
+              hint: const Text('Локальная библиотека'),
+              isExpanded: true,
+              onChanged: _busy ? null : (value) => setState(() {
+                _playlist = value;
+                _recent = false;
+                _recommended = false;
+                _tracks = _load();
+              }),
+              items: [
+                const DropdownMenuItem<int>(value: null, child: Text('Локальная библиотека')),
+                for (final row in state.data ?? <Map<String, Object?>>[])
+                  DropdownMenuItem(value: row['id'] as int, child: Text(row['title'] as String)),
+              ],
+            ),
+          ),
+          if (_playlist == null)
+            Wrap(spacing: 8, children: [
+              FilterChip(
+                label: const Text('Недавние'), selected: _recent,
+                onSelected: (value) => setState(() {
+                  _recent = value; _recommended = false; _tracks = _load();
+                }),
+              ),
+              FilterChip(
+                label: const Text('Рекомендации'), selected: _recommended,
+                onSelected: (value) => setState(() {
+                  _recommended = value; _recent = false; _tracks = _load();
+                }),
+              ),
+            ]),
           if (_busy) const LinearProgressIndicator(),
           if (snapshot.hasError) const Text('Не удалось открыть локальную библиотеку'),
-          for (final track in snapshot.data ?? <Map<String, Object?>>[])
-            if (!_recent || track['played_at'] != null)
+          if (snapshot.hasData)
+            for (final (index, track) in snapshot.data!.indexed)
               ListTile(
                 leading: const Icon(Icons.audiotrack),
                 title: Text(track['title'] as String),
-                onTap: _busy ? null : () => _perform(() => _start(track)),
-                trailing: IconButton(
-                  tooltip: 'Удалить аудио', icon: const Icon(Icons.delete_outline),
-                  onPressed: _busy ? null : () => _perform(() => _remove(track)),
+                onTap: _busy ? null : () => _perform(() => _start(snapshot.data!, index)),
+                trailing: PopupMenuButton<String>(
+                  tooltip: 'Действия с аудио',
+                  enabled: !_busy,
+                  onSelected: (action) {
+                    final id = track['id'] as int;
+                    if (action == 'add') unawaited(_perform(() => _addToPlaylist(id)));
+                    if (action == 'unlink') unawaited(_perform(() => _removeFromPlaylist(id)));
+                    if (action == 'delete') unawaited(_perform(() => _remove(track)));
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'add', child: Text('Добавить в плейлист')),
+                    if (_playlist != null)
+                      const PopupMenuItem(value: 'unlink', child: Text('Убрать из плейлиста')),
+                    const PopupMenuItem(value: 'delete', child: Text('Удалить из приложения')),
+                  ],
                 ),
               ),
           const Divider(),
