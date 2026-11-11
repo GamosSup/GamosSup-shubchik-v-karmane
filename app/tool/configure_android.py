@@ -27,3 +27,8 @@ recognition = ET.SubElement(queries, "intent")
 ET.SubElement(recognition, "action", {f"{{{namespace}}}name": "android.speech.RecognitionService"})
 ET.SubElement(root, "uses-permission", {f"{{{namespace}}}name": "android.permission.RECORD_AUDIO"})
 tree.write(path, encoding="utf-8", xml_declaration=True)
+
+activity = Path("android/app/src/main/kotlin/io/github/gamossup/shubchik/MainActivity.kt")
+if not activity.is_file():
+    raise FileNotFoundError(f"Missing Android activity: {activity}")
+activity.write_bytes(Path("tool/MainActivity.kt").read_bytes())
