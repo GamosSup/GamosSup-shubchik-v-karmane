@@ -29,6 +29,8 @@ ET.SubElement(root, "uses-permission", {f"{{{namespace}}}name": "android.permiss
 for permission in (
     "android.permission.POST_NOTIFICATIONS", "android.permission.RECEIVE_BOOT_COMPLETED",
     "android.permission.READ_CALENDAR",
+    "android.permission.WAKE_LOCK", "android.permission.FOREGROUND_SERVICE",
+    "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
 ):
     ET.SubElement(root, "uses-permission", {f"{{{namespace}}}name": permission})
 receiver = ET.SubElement(application, "receiver", {
@@ -47,6 +49,19 @@ ET.SubElement(widget, "meta-data", {
     f"{{{namespace}}}name": "android.appwidget.provider",
     f"{{{namespace}}}resource": "@xml/shubchik_widget_info",
 })
+service = ET.SubElement(application, "service", {
+    f"{{{namespace}}}name": "com.ryanheise.audioservice.AudioService",
+    f"{{{namespace}}}exported": "true",
+    f"{{{namespace}}}foregroundServiceType": "mediaPlayback",
+})
+browse = ET.SubElement(service, "intent-filter")
+ET.SubElement(browse, "action", {f"{{{namespace}}}name": "android.media.browse.MediaBrowserService"})
+buttons = ET.SubElement(application, "receiver", {
+    f"{{{namespace}}}name": "com.ryanheise.audioservice.MediaButtonReceiver",
+    f"{{{namespace}}}exported": "true",
+})
+media = ET.SubElement(buttons, "intent-filter")
+ET.SubElement(media, "action", {f"{{{namespace}}}name": "android.intent.action.MEDIA_BUTTON"})
 tree.write(path, encoding="utf-8", xml_declaration=True)
 
 activity = Path("android/app/src/main/kotlin/io/github/gamossup/shubchik/MainActivity.kt")
