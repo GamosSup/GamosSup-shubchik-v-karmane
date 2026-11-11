@@ -5,6 +5,8 @@ import 'account_screen.dart';
 import 'data_screen.dart';
 import 'guest_screen.dart';
 import 'guest_store.dart';
+import 'music_screen.dart';
+import 'poetry_screen.dart';
 
 void main() => runApp(const ShubchikApp());
 
@@ -49,10 +51,20 @@ class HomeScreen extends StatelessWidget {
           ListTile(title: const Text('Аккаунт'), leading: const Icon(Icons.person), onTap: () => Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => AccountScreen(guest: _guest)))),
           ListTile(title: const Text('Мои данные'), leading: const Icon(Icons.backup), onTap: () => Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => DataScreen(store: _guest)))),
           Text('Гостевой режим · данные на телефоне', style: Theme.of(context).textTheme.titleLarge),
-          const ListTile(leading: Icon(Icons.music_note), title: Text('Музыка'), subtitle: Text('В разработке')),
+          ListTile(
+            leading: const Icon(Icons.music_note), title: const Text('Музыка'),
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (_) => const MusicScreen()),
+            ),
+          ),
           ListTile(leading: const Icon(Icons.wallet), title: const Text('Финансы'), onTap: () => _open(context, finance: true)),
           ListTile(leading: const Icon(Icons.event), title: const Text('Планировщик'), onTap: () => _open(context, finance: false)),
-          const ListTile(leading: Icon(Icons.school), title: Text('Развитие'), subtitle: Text('В разработке')),
+          ListTile(
+            leading: const Icon(Icons.school), title: const Text('Развитие'),
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (_) => const PoetryScreen()),
+            ),
+          ),
         ],
       ),
     );

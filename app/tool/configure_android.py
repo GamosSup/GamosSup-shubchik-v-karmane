@@ -18,4 +18,9 @@ if not any(
         root, "uses-permission",
         {f"{{{namespace}}}name": "android.permission.INTERNET"},
     )
+queries = root.find("queries")
+if queries is None:
+    queries = ET.SubElement(root, "queries")
+tts = ET.SubElement(queries, "intent")
+ET.SubElement(tts, "action", {f"{{{namespace}}}name": "android.intent.action.TTS_SERVICE"})
 tree.write(path, encoding="utf-8", xml_declaration=True)
