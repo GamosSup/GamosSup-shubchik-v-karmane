@@ -13,12 +13,13 @@ class GuestStore {
     try {
       return await openDatabase(
         fileName,
-        version: 4,
+        version: 5,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onUpgrade: (db, oldVersion, _) async {
           if (oldVersion < 2) await _createSyncState(db);
           if (oldVersion < 3) await _createBankFields(db);
           if (oldVersion < 4) await _createPlannerFields(db);
+          if (oldVersion < 5) await _createFinanceFields(db);
         },
         onCreate: (db, version) async {
           await _createSyncState(db);
@@ -38,6 +39,7 @@ class GuestStore {
           ''');
           await _createBankFields(db);
           await _createPlannerFields(db);
+          await _createFinanceFields(db);
         },
       );
     } catch (_) {
@@ -103,8 +105,63 @@ class GuestStore {
     );
   }
 
-  Future<void> addMoney(String title, int cents) async {
-    await (await database).insert('ledger', {'title': title, 'cents': cents});
+  Future<void> _createFinanceFields(Database db) async {
+    await db.execute('ALTER TABLE ledger ADD COLUMN account TEXT');
+    await db.execute('ALTER TABLE ledger ADD COLUMN category TEXT');
+    await db.execute('ALTER TABLE ledger ADD COLUMN recorded_on TEXT');
+    await db.execute("""
+      CREATE TABLE finance_items (
+        id INTEGER PRIMARY KEY,
+        kind TEXT NOT NULL CHECK (kind IN ('account', 'budget', 'goal', 'debt', 'subscription')),
+        title TEXT NOT NULL,
+        target INTEGER NOT NULL,
+        current INTEGER NOT NULL DEFAULT 0,
+        due_on TEXT,
+        UNIQUE (kind, title)
+      )
+    """);
+  }
+
+  Future<void> addMoney(String title, int cents, {
+    String? account, String? category, String? recordedOn,
+  }) async {
+    await (await database).insert('ledger', {
+      'title': title, 'cents': cents, 'account': account,
+      'category': category, 'recorded_on': recordedOn,
+    });
+  }
+
+  Future<void> updateMoneyTags(int id, String? account, String? category) async {
+    await (await database).update('ledger', {
+      'account': account, 'category': category,
+    }, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> saveFinanceItem({
+    int? id, required String kind, required String title,
+    required int target, required int current, String? dueOn,
+  }) async {
+    final db = await database;
+    final values = {
+      'kind': kind, 'title': title, 'target': target, 'current': current, 'due_on': dueOn,
+    };
+    if (id == null) {
+      await db.insert('finance_items', values);
+    } else {
+      await db.transaction((tx) async {
+        final before = await tx.query('finance_items', where: 'id = ?', whereArgs: [id]);
+        if (before.isEmpty) throw StateError('Missing item');
+        if (kind == 'account' && title != before.single['title']) {
+          await tx.update('ledger', {'account': title},
+            where: 'account = ?', whereArgs: [before.single['title']]);
+        }
+        if (kind == 'budget' && title != before.single['title']) {
+          await tx.update('ledger', {'category': title},
+            where: 'category = ?', whereArgs: [before.single['title']]);
+        }
+        await tx.update('finance_items', values, where: 'id = ?', whereArgs: [id]);
+      });
+    }
   }
 
   Future<void> _createBankFields(Database db) async {
@@ -130,6 +187,7 @@ class GuestStore {
         await tx.insert('ledger', {
           'source_key': row.key, 'posted_on': row.date,
           'title': row.title, 'cents': row.cents,
+          'category': suggestCategory(row.title, row.cents),
         });
         inserted++;
       }
@@ -150,6 +208,7 @@ class GuestStore {
     await tx.query('ledger', orderBy: 'id'),
     habits: await tx.query('habits', orderBy: 'id'),
     habitEntries: await tx.query('habit_entries', orderBy: 'habit_id, day'),
+    financeItems: await tx.query('finance_items', orderBy: 'id'),
   );
 
   Future<void> restoreBackup(String text) async {
@@ -171,6 +230,9 @@ class GuestStore {
     }
     for (final row in backup.habitEntries) {
       await tx.insert('habit_entries', row);
+    }
+    for (final row in backup.financeItems) {
+      await tx.insert('finance_items', row);
     }
   }
 
@@ -231,6 +293,7 @@ class GuestStore {
   }
 
   Future<void> _clearData(Transaction tx) async {
+    await tx.delete('finance_items');
     await tx.delete('habit_entries');
     await tx.delete('habits');
     await tx.delete('tasks');
@@ -253,6 +316,24 @@ String formatMoney(int cents) {
   return '${cents < 0 ? '−' : ''}${value ~/ 100},$fraction ₽';
 }
 
+const financeKinds = {'account', 'budget', 'goal', 'debt', 'subscription'};
+
+String suggestCategory(String title, int cents) {
+  if (cents > 0) return 'Доход';
+  final text = title.toLowerCase();
+  const hints = {
+    'Продукты': ['продукт', 'пятёрочка', 'пятерочка', 'магнит', 'перекрёсток', 'вкусвилл'],
+    'Транспорт': ['такси', 'метро', 'бензин', 'проезд', 'парковк'],
+    'Здоровье': ['аптек', 'клиник', 'стоматолог'],
+    'Связь': ['интернет', 'мтс', 'мегафон', 'билайн'],
+    'Развлечения': ['кино', 'музык', 'театр'],
+  };
+  for (final item in hints.entries) {
+    if (item.value.any(text.contains)) return item.key;
+  }
+  return 'Прочее';
+}
+
 typedef BankRow = ({String key, String date, String title, int cents});
 
 bool validStatementDate(String value) {
@@ -266,6 +347,7 @@ typedef GuestBackup = ({
   List<Map<String, Object?>> ledger,
   List<Map<String, Object?>> habits,
   List<Map<String, Object?>> habitEntries,
+  List<Map<String, Object?>> financeItems,
 });
 
 String encodeBackup(
@@ -273,6 +355,7 @@ String encodeBackup(
   List<Map<String, Object?>> ledger, {
   List<Map<String, Object?>> habits = const [],
   List<Map<String, Object?>> habitEntries = const [],
+  List<Map<String, Object?>> financeItems = const [],
 }) {
   final planned = tasks.map((row) => {
     'id': row['id'], 'title': row['title'], 'done': row['done'],
@@ -283,24 +366,30 @@ String encodeBackup(
       planned.any((row) => row.containsKey('due_on') || row.containsKey('project'));
   final money = ledger.map((row) => {
     'id': row['id'], 'title': row['title'], 'cents': row['cents'],
+    if (row['account'] != null) 'account': row['account'],
+    if (row['category'] != null) 'category': row['category'],
+    if (row['recorded_on'] != null) 'recorded_on': row['recorded_on'],
     if (row['source_key'] != null) ...{
       'source_key': row['source_key'], 'posted_on': row['posted_on'],
     },
   }).toList();
+  final finance = financeItems.isNotEmpty || money.any((row) =>
+      row.containsKey('account') || row.containsKey('category') || row.containsKey('recorded_on'));
   return jsonEncode({
     'format': 'shubchik-guest',
-    'version': planner ? 3 : money.any((row) => row.containsKey('source_key')) ? 2 : 1,
+    'version': finance ? 4 : planner ? 3 : money.any((row) => row.containsKey('source_key')) ? 2 : 1,
     'tasks': planned,
     'ledger': money,
-    if (planner) 'habits': habits,
-    if (planner) 'habit_entries': habitEntries,
+    if (planner || finance) 'habits': habits,
+    if (planner || finance) 'habit_entries': habitEntries,
+    if (finance) 'finance_items': financeItems,
   });
 }
 
 GuestBackup decodeBackup(String text) {
   if (text.length > 10000000) throw const FormatException('Слишком большой файл');
   final data = jsonDecode(text);
-  if (data is! Map || data['format'] != 'shubchik-guest' || !const {1, 2, 3}.contains(data['version'])) {
+  if (data is! Map || data['format'] != 'shubchik-guest' || !const {1, 2, 3, 4}.contains(data['version'])) {
     throw const FormatException('Неизвестный формат резервной копии');
   }
 
@@ -327,13 +416,13 @@ GuestBackup decodeBackup(String text) {
         final due = row['due_on'];
         final project = row['project'];
         if (due != null) {
-          if (data['version'] != 3 || due is! String || !validStatementDate(due)) {
+          if ((data['version'] as int) < 3 || due is! String || !validStatementDate(due)) {
             throw const FormatException('Некорректный срок задачи');
           }
           result['due_on'] = due;
         }
         if (project != null) {
-          if (data['version'] != 3 || project is! String ||
+          if ((data['version'] as int) < 3 || project is! String ||
               project.trim().isEmpty || project.length > 80) {
             throw const FormatException('Некорректное название проекта');
           }
@@ -345,6 +434,15 @@ GuestBackup decodeBackup(String text) {
           throw const FormatException('Некорректная сумма');
         }
         result['cents'] = row['cents'];
+        for (final key in ['account', 'category', 'recorded_on']) {
+          final value = row[key];
+          if (value == null) continue;
+          if (data['version'] != 4 || value is! String || value.trim().isEmpty ||
+              value.length > 80 || (key == 'recorded_on' && !validStatementDate(value))) {
+            throw const FormatException('Некорректная информация об операции');
+          }
+          result[key] = value;
+        }
         final source = row['source_key'];
         final date = row['posted_on'];
         if (source != null || date != null) {
@@ -363,8 +461,8 @@ GuestBackup decodeBackup(String text) {
 
   final tasks = rows('tasks');
   final ledger = rows('ledger');
-  if (data['version'] != 3) {
-    return (tasks: tasks, ledger: ledger, habits: [], habitEntries: []);
+  if ((data['version'] as int) < 3) {
+    return (tasks: tasks, ledger: ledger, habits: [], habitEntries: [], financeItems: []);
   }
   final habits = rows('habits');
   final ids = habits.map((row) => row['id']).toSet();
@@ -383,5 +481,38 @@ GuestBackup decodeBackup(String text) {
     }
     return {'habit_id': id, 'day': day};
   }).toList();
-  return (tasks: tasks, ledger: ledger, habits: habits, habitEntries: habitEntries);
+  final financeItems = <Map<String, Object?>>[];
+  if (data['version'] == 4) {
+    final records = data['finance_items'];
+    if (records is! List || records.length > 5000) {
+      throw const FormatException('Некорректный финансовый план');
+    }
+    final itemIds = <int>{};
+    final itemNames = <(String, String)>{};
+    for (final row in records) {
+      if (row is! Map) throw const FormatException('Некорректный финансовый план');
+      final id = row['id'];
+      final kind = row['kind'];
+      final title = row['title'];
+      final target = row['target'];
+      final current = row['current'];
+      final due = row['due_on'];
+      if (id is! int || id <= 0 || !itemIds.add(id) ||
+          kind is! String || !financeKinds.contains(kind) ||
+          title is! String || title.trim().isEmpty || title.length > 80 ||
+          !itemNames.add((kind, title)) ||
+          target is! int || target.abs() > 99999999999 ||
+          (kind != 'account' && target <= 0) ||
+          current is! int || current < 0 || current > 99999999999 ||
+          (due != null && (due is! String || !validStatementDate(due)))) {
+        throw const FormatException('Некорректный финансовый план');
+      }
+      financeItems.add({
+        'id': id, 'kind': kind, 'title': title, 'target': target, 'current': current, 'due_on': due,
+      });
+    }
+  }
+  return (
+    tasks: tasks, ledger: ledger, habits: habits, habitEntries: habitEntries, financeItems: financeItems,
+  );
 }
