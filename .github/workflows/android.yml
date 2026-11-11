@@ -1,5 +1,7 @@
 name: Android
 on:
+  push:
+    branches: [main, flutter-foundation]
   pull_request:
   workflow_dispatch:
 permissions:
