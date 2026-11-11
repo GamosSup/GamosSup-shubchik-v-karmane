@@ -4,6 +4,7 @@ import 'device_calendar.dart';
 import 'bank_import_screen.dart';
 import 'habit_screen.dart';
 import 'finance_plans_screen.dart';
+import 'receipt_screen.dart';
 
 enum PlannerView { all, day, week, month, timeline }
 
@@ -274,10 +275,22 @@ class _GuestScreenState extends State<GuestScreen> {
                   }),
                 ),
                 trailing: widget.finance
-                    ? IconButton(
-                        tooltip: 'Удалить', icon: const Icon(Icons.delete_outline),
-                        onPressed: _saving ? null : () => _remove(id),
-                      )
+                    ? Row(mainAxisSize: MainAxisSize.min, children: [
+                        IconButton(
+                          tooltip: 'Чек',
+                          icon: Icon(row['receipt_name'] == null ? Icons.attach_file : Icons.receipt_long),
+                          onPressed: _saving ? null : () async {
+                            await Navigator.of(context).push<void>(MaterialPageRoute(
+                              builder: (_) => ReceiptScreen(store: widget.store, ledgerId: id),
+                            ));
+                            if (mounted) _refresh();
+                          },
+                        ),
+                        IconButton(
+                          tooltip: 'Удалить', icon: const Icon(Icons.delete_outline),
+                          onPressed: _saving ? null : () => _remove(id),
+                        ),
+                      ])
                     : PopupMenuButton<_TaskAction>(
                         tooltip: 'Действия с задачей',
                         enabled: !_saving,
