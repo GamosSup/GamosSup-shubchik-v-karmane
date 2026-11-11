@@ -69,7 +69,7 @@ class _BankImportScreenState extends State<BankImportScreen> {
 
   Future<void> _save() async {
     final rows = _rows;
-    final count = await widget.store.importBankRows(rows);
+    final count = await widget.store.importBankRows(rows, account: _account.text.trim());
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Добавлено: $count. Уже были в журнале: ${rows.length - count}.')),
