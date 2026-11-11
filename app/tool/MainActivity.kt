@@ -14,8 +14,19 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private var pendingReminder: (() -> Unit)? = null
     private var pendingResult: MethodChannel.Result? = null
+    private var widgetChannel: MethodChannel? = null
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        widgetChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "shubchik/widget")
+        widgetChannel?.setMethodCallHandler { call, result ->
+            if (call.method == "getInitialSection") {
+                val section = intent.getStringExtra("widget_section")
+                intent.removeExtra("widget_section")
+                result.success(section)
+            } else {
+                result.notImplemented()
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "shubchik/calendar")
             .setMethodCallHandler { call, result ->
                 if (call.method != "composeEvent") {
@@ -91,6 +102,17 @@ class MainActivity : FlutterActivity() {
                     schedule()
                 }
             }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val section = intent.getStringExtra("widget_section") ?: return
+        widgetChannel?.invokeMethod("openSection", section, object : MethodChannel.Result {
+            override fun success(result: Any?) { intent.removeExtra("widget_section") }
+            override fun error(code: String, message: String?, details: Any?) {}
+            override fun notImplemented() {}
+        })
     }
 
     override fun onRequestPermissionsResult(
