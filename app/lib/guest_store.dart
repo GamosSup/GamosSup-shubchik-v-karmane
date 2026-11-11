@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 
 class GuestStore {
@@ -53,6 +54,39 @@ class GuestStore {
   Future<void> remove(String table, int id) async {
     await (await database).delete(table, where: 'id = ?', whereArgs: [id]);
   }
+  Future<String> exportBackup() async {
+    final db = await database;
+    return db.transaction((tx) async => jsonEncode({
+      'format': 'shubchik-guest',
+      'version': 1,
+      'tasks': await tx.query('tasks', orderBy: 'id'),
+      'ledger': await tx.query('ledger', orderBy: 'id'),
+    }));
+  }
+
+  Future<void> restoreBackup(String text) async {
+    final backup = decodeBackup(text);
+    final db = await database;
+    await db.transaction((tx) async {
+      await tx.delete('tasks');
+      await tx.delete('ledger');
+      for (final row in backup.tasks) {
+        await tx.insert('tasks', row);
+      }
+      for (final row in backup.ledger) {
+        await tx.insert('ledger', row);
+      }
+    });
+  }
+
+  Future<void> clear() async {
+    final db = await database;
+    await db.transaction((tx) async {
+      await tx.delete('tasks');
+      await tx.delete('ledger');
+    });
+  }
+
 }
 
 int? parseCents(String input) {
@@ -67,4 +101,45 @@ String formatMoney(int cents) {
   final value = cents.abs();
   final fraction = (value % 100).toString().padLeft(2, '0');
   return '${cents < 0 ? '−' : ''}${value ~/ 100},$fraction ₽';
+}
+
+({List<Map<String, Object?>> tasks, List<Map<String, Object?>> ledger})
+    decodeBackup(String text) {
+  if (text.length > 10000000) throw const FormatException('Слишком большой файл');
+  final data = jsonDecode(text);
+  if (data is! Map || data['format'] != 'shubchik-guest' || data['version'] != 1) {
+    throw const FormatException('Неизвестный формат резервной копии');
+  }
+
+  List<Map<String, Object?>> rows(String table) {
+    final values = data[table];
+    if (values is! List || values.length > 50000) {
+      throw const FormatException('Некорректный список записей');
+    }
+    final ids = <int>{};
+    return values.map<Map<String, Object?>>((row) {
+      if (row is! Map || row['id'] is! int ||
+          row['id'] <= 0 || !ids.add(row['id'] as int) ||
+          row['title'] is! String || (row['title'] as String).trim().isEmpty ||
+          (row['title'] as String).length > 120) {
+        throw const FormatException('Некорректная запись');
+      }
+      final result = <String, Object?>{'id': row['id'], 'title': row['title']};
+      if (table == 'tasks') {
+        if (row['done'] != 0 && row['done'] != 1) {
+          throw const FormatException('Некорректное состояние задачи');
+        }
+        result['done'] = row['done'];
+      } else {
+        if (row['cents'] is! int || row['cents'] == 0 ||
+            (row['cents'] as int).abs() > 99999999999) {
+          throw const FormatException('Некорректная сумма');
+        }
+        result['cents'] = row['cents'];
+      }
+      return result;
+    }).toList();
+  }
+
+  return (tasks: rows('tasks'), ledger: rows('ledger'));
 }
