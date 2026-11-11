@@ -1,7 +1,7 @@
 name: Android
 on:
   push:
-    branches: [main, android-reminders]
+    branches: [main, home-screen-widget]
   pull_request:
   workflow_dispatch:
 permissions:

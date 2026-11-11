@@ -34,6 +34,16 @@ receiver = ET.SubElement(application, "receiver", {
 })
 boot = ET.SubElement(receiver, "intent-filter")
 ET.SubElement(boot, "action", {f"{{{namespace}}}name": "android.intent.action.BOOT_COMPLETED"})
+widget = ET.SubElement(application, "receiver", {
+    f"{{{namespace}}}name": ".PlannerWidgetProvider",
+    f"{{{namespace}}}exported": "false",
+})
+updates = ET.SubElement(widget, "intent-filter")
+ET.SubElement(updates, "action", {f"{{{namespace}}}name": "android.appwidget.action.APPWIDGET_UPDATE"})
+ET.SubElement(widget, "meta-data", {
+    f"{{{namespace}}}name": "android.appwidget.provider",
+    f"{{{namespace}}}resource": "@xml/shubchik_widget_info",
+})
 tree.write(path, encoding="utf-8", xml_declaration=True)
 
 activity = Path("android/app/src/main/kotlin/io/github/gamossup/shubchik/MainActivity.kt")
@@ -42,3 +52,9 @@ if not activity.is_file():
 activity.write_bytes(Path("tool/MainActivity.kt").read_bytes())
 
 activity.with_name("ReminderReceiver.kt").write_bytes(Path("tool/ReminderReceiver.kt").read_bytes())
+
+activity.with_name("PlannerWidgetProvider.kt").write_bytes(Path("tool/PlannerWidgetProvider.kt").read_bytes())
+for resource in Path("tool/widget").glob("*/*.xml"):
+    destination = Path("android/app/src/main/res") / resource.parent.name / resource.name
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(resource.read_bytes())
