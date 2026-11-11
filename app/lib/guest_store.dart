@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 
 class GuestStore {
+  GuestStore({this.fileName = 'shubchik_guest.db'});
+
+  final String fileName;
   Future<Database>? _opening;
 
   Future<Database> get database => _opening ??= _open();
@@ -9,9 +12,13 @@ class GuestStore {
   Future<Database> _open() async {
     try {
       return await openDatabase(
-        'shubchik_guest.db',
-        version: 1,
+        fileName,
+        version: 2,
+        onUpgrade: (db, oldVersion, _) async {
+          if (oldVersion < 2) await _createSyncState(db);
+        },
         onCreate: (db, version) async {
+          await _createSyncState(db);
           await db.execute('''
             CREATE TABLE tasks (
               id INTEGER PRIMARY KEY,
@@ -56,26 +63,79 @@ class GuestStore {
   }
   Future<String> exportBackup() async {
     final db = await database;
-    return db.transaction((tx) async => jsonEncode({
-      'format': 'shubchik-guest',
-      'version': 1,
-      'tasks': await tx.query('tasks', orderBy: 'id'),
-      'ledger': await tx.query('ledger', orderBy: 'id'),
-    }));
+    return db.transaction(_export);
   }
+
+  Future<String> _export(Transaction tx) async => encodeBackup(
+    await tx.query('tasks', orderBy: 'id'),
+    await tx.query('ledger', orderBy: 'id'),
+  );
 
   Future<void> restoreBackup(String text) async {
     final backup = decodeBackup(text);
     final db = await database;
-    await db.transaction((tx) async {
-      await tx.delete('tasks');
-      await tx.delete('ledger');
-      for (final row in backup.tasks) {
-        await tx.insert('tasks', row);
+    await db.transaction((tx) => _replace(tx, backup));
+  }
+
+  Future<void> _replace(Transaction tx, GuestBackup backup) async {
+    await tx.delete('tasks');
+    await tx.delete('ledger');
+    for (final row in backup.tasks) {
+      await tx.insert('tasks', row);
+    }
+    for (final row in backup.ledger) {
+      await tx.insert('ledger', row);
+    }
+  }
+
+  Future<void> _createSyncState(Database db) => db.execute('''
+    CREATE TABLE sync_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      revision INTEGER NOT NULL,
+      payload TEXT NOT NULL
+    )
+  ''');
+
+  Future<({String local, String base, int revision})> readSyncState() async {
+    final db = await database;
+    return db.transaction((tx) async {
+      final rows = await tx.query('sync_state', where: 'id = 1');
+      final row = rows.firstOrNull;
+      return (
+        local: await _export(tx),
+        base: row?['payload'] as String? ?? encodeBackup([], []),
+        revision: row?['revision'] as int? ?? 0,
+      );
+    });
+  }
+
+  Future<bool> acceptSync({
+    required int revision,
+    required String payload,
+    required String expectedLocal,
+    required bool replaceLocal,
+  }) async {
+    final backup = decodeBackup(payload);
+    final db = await database;
+    return db.transaction((tx) async {
+      if (replaceLocal) {
+        if (await _export(tx) != expectedLocal) return false;
+        await _replace(tx, backup);
       }
-      for (final row in backup.ledger) {
-        await tx.insert('ledger', row);
-      }
+      await tx.insert('sync_state', {
+        'id': 1, 'revision': revision, 'payload': payload,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      return true;
+    });
+  }
+
+  Future<bool> importIfEmpty(String payload) async {
+    final backup = decodeBackup(payload);
+    final db = await database;
+    return db.transaction((tx) async {
+      if (await _export(tx) != encodeBackup([], [])) return false;
+      await _replace(tx, backup);
+      return true;
     });
   }
 
@@ -103,8 +163,15 @@ String formatMoney(int cents) {
   return '${cents < 0 ? '−' : ''}${value ~/ 100},$fraction ₽';
 }
 
-({List<Map<String, Object?>> tasks, List<Map<String, Object?>> ledger})
-    decodeBackup(String text) {
+typedef GuestBackup = ({
+  List<Map<String, Object?>> tasks,
+  List<Map<String, Object?>> ledger,
+});
+
+String encodeBackup(List<Map<String, Object?>> tasks, List<Map<String, Object?>> ledger) =>
+    jsonEncode({'format': 'shubchik-guest', 'version': 1, 'tasks': tasks, 'ledger': ledger});
+
+GuestBackup decodeBackup(String text) {
   if (text.length > 10000000) throw const FormatException('Слишком большой файл');
   final data = jsonDecode(text);
   if (data is! Map || data['format'] != 'shubchik-guest' || data['version'] != 1) {
