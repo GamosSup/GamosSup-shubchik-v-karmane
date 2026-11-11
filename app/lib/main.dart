@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 
 import 'account_screen.dart';
+import 'account_workspace.dart';
+import 'auth_client.dart';
 import 'assistant_screen.dart';
 import 'data_screen.dart';
 import 'focus_screen.dart';
@@ -53,13 +57,20 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static final _guest = GuestStore();
   static const _widgetChannel = MethodChannel('shubchik/widget');
+  late final Timer _accountSyncTimer;
+  bool _syncingAccount = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _accountSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      unawaited(_syncAccount());
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_syncAccount()));
     _widgetChannel.setMethodCallHandler((call) async {
       if (call.method == 'openSection') _openWidgetSection(call.arguments);
     });
@@ -68,8 +79,39 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _accountSyncTimer.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     _widgetChannel.setMethodCallHandler(null);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(_syncAccount());
+  }
+
+  bool get _canSyncAccount =>
+      mounted &&
+      ModalRoute.of(context)?.isCurrent == true &&
+      WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
+      AccountSync.openWorkspaces == 0;
+
+  Future<void> _syncAccount() async {
+    if (!_canSyncAccount || _syncingAccount) return;
+    _syncingAccount = true;
+    try {
+      if (!await const SecureSessionStorage().hasAccessToken()) return;
+      final client = await authClient();
+      final accountId = client.auth.currentUser?.id;
+      if (!_canSyncAccount || accountId == null) return;
+      await AccountSync(client, accountId).synchronize(
+        GuestStore(fileName: 'account_$accountId.db'),
+      );
+    } catch (_) {
+      // The next foreground tick retries. The account screen shows sync errors.
+    } finally {
+      _syncingAccount = false;
+    }
   }
 
   Future<void> _readWidgetLaunch() async {

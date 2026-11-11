@@ -24,6 +24,78 @@ SyncDecision compareSnapshots(SyncState state, Snapshot remote) {
   return SyncDecision.conflict;
 }
 
+typedef AccountConflict = ({SyncState local, Snapshot remote});
+typedef AccountSyncResult = ({AccountConflict? conflict, String status});
+
+class AccountSync {
+  AccountSync(this.client, this.accountId);
+
+  final SupabaseClient client;
+  final String accountId;
+  static int openWorkspaces = 0;
+  static final _pending = <String, Future<AccountSyncResult>>{};
+
+  bool get isCurrent => client.auth.currentUser?.id == accountId;
+
+  Future<Snapshot> readRemote() async {
+    final row = await client.from('account_snapshots')
+        .select('revision,payload').eq('owner_id', accountId).maybeSingle();
+    if (row == null) return (revision: 0, payload: encodeBackup([], []));
+    final decoded = decodeBackup(jsonEncode(row['payload']));
+    return (
+      revision: row['revision'] as int,
+      payload: encodeBackup(
+        decoded.tasks, decoded.ledger, habits: decoded.habits,
+        habitEntries: decoded.habitEntries, financeItems: decoded.financeItems,
+      ),
+    );
+  }
+
+  Future<int> push(String payload, int revision) async {
+    if (!isCurrent) throw StateError('Account changed');
+    return await client.rpc('save_account_snapshot', params: {
+      'expected_revision': revision,
+      'backup': jsonDecode(payload),
+    }) as int;
+  }
+
+  Future<AccountSyncResult> synchronize(GuestStore store) =>
+      _pending.putIfAbsent(accountId, () async {
+        try {
+          return await _synchronize(store);
+        } finally {
+          _pending.remove(accountId);
+        }
+      });
+
+  Future<AccountSyncResult> _synchronize(GuestStore store) async {
+    final local = await store.readSyncState();
+    if (!isCurrent) throw StateError('Account changed');
+    final remote = await readRemote();
+    if (!isCurrent) throw StateError('Account changed');
+    final decision = compareSnapshots(local, remote);
+    if (decision == SyncDecision.conflict) {
+      return (
+        conflict: (local: local, remote: remote),
+        status: 'На другом устройстве есть изменения. Выберите версию.',
+      );
+    }
+    final uploading = decision == SyncDecision.upload;
+    final revision = uploading ? await push(local.local, remote.revision) : remote.revision;
+    if (!isCurrent) throw StateError('Account changed');
+    final accepted = await store.acceptSync(
+      revision: revision,
+      payload: uploading ? local.local : remote.payload,
+      expectedLocal: local.local,
+      replaceLocal: decision == SyncDecision.download,
+    );
+    return (
+      conflict: null,
+      status: accepted ? 'Синхронизация выполнена' : 'Есть новые локальные изменения',
+    );
+  }
+}
+
 class AccountWorkspace extends StatefulWidget {
   const AccountWorkspace({
     super.key, required this.client, required this.accountId, required this.guest,
@@ -39,18 +111,20 @@ class AccountWorkspace extends StatefulWidget {
 
 class _AccountWorkspaceState extends State<AccountWorkspace> with WidgetsBindingObserver {
   late final GuestStore _store = GuestStore(fileName: 'account_${widget.accountId}.db');
+  late final _syncClient = AccountSync(widget.client, widget.accountId);
   late final Timer _timer;
   late final StreamSubscription<AuthState> _authChanges;
   bool _busy = false;
   bool _editorOpen = false;
   String _status = 'Проверяем синхронизацию…';
-  ({SyncState local, Snapshot remote})? _conflict;
+  AccountConflict? _conflict;
 
   bool get _sameAccount => widget.client.auth.currentUser?.id == widget.accountId;
 
   @override
   void initState() {
     super.initState();
+    AccountSync.openWorkspaces++;
     WidgetsBinding.instance.addObserver(this);
     _authChanges = widget.client.auth.onAuthStateChange.listen((_) {
       if (!_sameAccount && mounted) setState(() {});
@@ -65,6 +139,7 @@ class _AccountWorkspaceState extends State<AccountWorkspace> with WidgetsBinding
 
   @override
   void dispose() {
+    AccountSync.openWorkspaces--;
     _timer.cancel();
     unawaited(_authChanges.cancel());
     WidgetsBinding.instance.removeObserver(this);
@@ -76,56 +151,15 @@ class _AccountWorkspaceState extends State<AccountWorkspace> with WidgetsBinding
     if (state == AppLifecycleState.resumed) unawaited(_sync());
   }
 
-  Future<Snapshot> _readRemote() async {
-    final row = await widget.client.from('account_snapshots')
-        .select('revision,payload').eq('owner_id', widget.accountId).maybeSingle();
-    if (row == null) return (revision: 0, payload: encodeBackup([], []));
-    final decoded = decodeBackup(jsonEncode(row['payload']));
-    return (
-      revision: row['revision'] as int,
-      payload: encodeBackup(
-        decoded.tasks, decoded.ledger, habits: decoded.habits,
-        habitEntries: decoded.habitEntries, financeItems: decoded.financeItems,
-      ),
-    );
-  }
-
-  Future<int> _push(String payload, int revision) async {
-    if (!_sameAccount) throw StateError('Account changed');
-    return await widget.client.rpc('save_account_snapshot', params: {
-      'expected_revision': revision,
-      'backup': jsonDecode(payload),
-    }) as int;
-  }
-
   Future<void> _sync() async {
     if (!mounted || _busy || _editorOpen || !_sameAccount) return;
     setState(() => _busy = true);
     try {
-      final local = await _store.readSyncState();
-      if (!_sameAccount) return;
-      final remote = await _readRemote();
+      final result = await _syncClient.synchronize(_store);
       if (!mounted || !_sameAccount) return;
-      final decision = compareSnapshots(local, remote);
-      if (decision == SyncDecision.conflict) {
-        setState(() {
-          _conflict = (local: local, remote: remote);
-          _status = 'На другом устройстве есть изменения. Выберите версию.';
-        });
-        return;
-      }
-      final uploading = decision == SyncDecision.upload;
-      final revision = uploading ? await _push(local.local, remote.revision) : remote.revision;
-      if (!mounted || !_sameAccount) return;
-      final accepted = await _store.acceptSync(
-        revision: revision,
-        payload: uploading ? local.local : remote.payload,
-        expectedLocal: local.local,
-        replaceLocal: decision == SyncDecision.download,
-      );
-      if (mounted) setState(() {
-        _conflict = null;
-        _status = accepted ? 'Синхронизация выполнена' : 'Есть новые локальные изменения';
+      setState(() {
+        _conflict = result.conflict;
+        _status = result.status;
       });
     } catch (_) {
       if (mounted) setState(() => _status = 'Синхронизация недоступна. Записи остаются на телефоне.');
@@ -157,7 +191,7 @@ class _AccountWorkspaceState extends State<AccountWorkspace> with WidgetsBinding
     try {
       final current = await _store.readSyncState();
       if (current.local != conflict.local.local) throw StateError('Local changed');
-      final remote = await _readRemote();
+      final remote = await _syncClient.readRemote();
       if (!mounted || !_sameAccount) return;
       if (remote != conflict.remote) {
         setState(() {
@@ -167,7 +201,7 @@ class _AccountWorkspaceState extends State<AccountWorkspace> with WidgetsBinding
         return;
       }
       final payload = useRemote ? remote.payload : current.local;
-      final revision = useRemote ? conflict.remote.revision : await _push(payload, conflict.remote.revision);
+      final revision = useRemote ? conflict.remote.revision : await _syncClient.push(payload, conflict.remote.revision);
       if (!mounted || !_sameAccount) return;
       final accepted = await _store.acceptSync(
         revision: revision, payload: payload, expectedLocal: current.local,
@@ -191,7 +225,7 @@ class _AccountWorkspaceState extends State<AccountWorkspace> with WidgetsBinding
     if (!mounted || !confirmed || _busy || !_sameAccount) return;
     setState(() => _busy = true);
     try {
-      final remote = await _readRemote();
+      final remote = await _syncClient.readRemote();
       final local = await _store.readSyncState();
       if (remote.revision != 0 || local.revision != 0) {
         if (mounted) setState(() => _status = 'В аккаунте уже есть облачная версия');
