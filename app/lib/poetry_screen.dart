@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:sqflite/sqflite.dart';
 
+import 'voice_button.dart';
+
 typedef Poem = ({String author, String title, String language, List<String> lines, String? translation});
 
 const List<Poem> _poems = [
@@ -245,7 +247,26 @@ class _PoetryScreenState extends State<PoetryScreen> {
                 child: Text(_result! ? 'Верно · дальше' : 'Дальше'),
               ),
             if (step == 4) ...[
-              const Text('Прочитайте отрывок вслух по памяти. Затем откройте текст и оцените себя.'),
+              const Text('Прочитайте отрывок по памяти. Можно проверить распознанный текст или оценить себя.'),
+              VoiceButton(
+                enabled: !_saving, locale: poem.language.replaceAll('-', '_'),
+                onWords: (words) => _answer.text = words,
+              ),
+              TextField(
+                controller: _answer, maxLines: 3,
+                decoration: const InputDecoration(labelText: 'Распознанный текст'),
+              ),
+              OutlinedButton(
+                onPressed: _saving ? null : () {
+                  final spoken = _normalize(_answer.text);
+                  if (spoken.isEmpty) {
+                    _message('Продиктуйте или введите текст');
+                    return;
+                  }
+                  _advance(practice, spoken == _normalize(poem.lines.join(' ')));
+                },
+                child: const Text('Проверить и завершить'),
+              ),
               ExpansionTile(title: const Text('Сверить с текстом'), children: [Text(poem.lines.join('\n'))]),
               FilledButton(onPressed: _saving ? null : () => _advance(practice, true), child: const Text('Прочитал без ошибок')),
               OutlinedButton(onPressed: _saving ? null : () => _advance(practice, false), child: const Text('Нужно повторить')),
