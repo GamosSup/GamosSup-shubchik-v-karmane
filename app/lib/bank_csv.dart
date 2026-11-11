@@ -4,8 +4,6 @@ import 'package:csv/csv.dart';
 
 import 'guest_store.dart';
 
-typedef BankRow = ({String key, String date, String title, int cents});
-
 List<BankRow> parseBankCsv(String raw, {required String bank, required String account}) {
   final accountCode = account.trim().toLowerCase();
   if (!const {'sber', 'ozon', 'other'}.contains(bank) ||
@@ -26,9 +24,7 @@ List<BankRow> parseBankCsv(String raw, {required String bank, required String ac
     if (cells.every((cell) => cell.isEmpty)) continue;
     if (cells.length != 4) throw FormatException('Строка ${index + 1}: ожидается 4 поля');
     final [id, date, title, amount] = cells;
-    final dateValue = DateTime.tryParse(date);
-    final validDate = RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(date) &&
-        dateValue != null && dateValue.toIso8601String().startsWith('${date}T');
+    final validDate = validStatementDate(date);
     final negative = amount.startsWith('-');
     final magnitude = amount.startsWith('-') || amount.startsWith('+') ? amount.substring(1) : amount;
     final cents = parseCents(magnitude);
