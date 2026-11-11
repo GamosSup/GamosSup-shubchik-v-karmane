@@ -250,7 +250,7 @@ class _GuestScreenState extends State<GuestScreen> {
                   value: row['done'] == 1,
                   onChanged: _saving ? null : (done) => _save(() async {
                     await widget.store.setDone(id, done!);
-                    if (done) await cancelTaskReminder(_reminderKey(id));
+                    if (done == true) await cancelTaskReminder(_reminderKey(id));
                   }),
                 ),
                 trailing: widget.finance
