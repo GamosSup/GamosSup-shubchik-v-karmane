@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'guest_store.dart';
+import 'device_calendar.dart';
 import 'bank_import_screen.dart';
 
 class GuestScreen extends StatefulWidget {
@@ -123,9 +124,21 @@ class _GuestScreenState extends State<GuestScreen> {
                   value: row['done'] == 1,
                   onChanged: _saving ? null : (done) => _save(() => widget.store.setDone(id, done!)),
                 ),
-                trailing: IconButton(
-                  tooltip: 'Удалить', icon: const Icon(Icons.delete_outline),
-                  onPressed: _saving ? null : () => _remove(id),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (!widget.finance) IconButton(
+                      tooltip: 'Открыть в календаре',
+                      icon: const Icon(Icons.event_available),
+                      onPressed: _saving ? null : () => composeCalendarEvent(
+                        context, row['title'] as String,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Удалить', icon: const Icon(Icons.delete_outline),
+                      onPressed: _saving ? null : () => _remove(id),
+                    ),
+                  ],
                 ),
               );
             },
