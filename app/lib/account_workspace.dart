@@ -8,6 +8,7 @@ import 'assistant_screen.dart';
 import 'data_screen.dart';
 import 'guest_screen.dart';
 import 'guest_store.dart';
+import 'history_screen.dart';
 
 typedef Snapshot = ({int revision, String payload});
 typedef SyncState = ({int revision, String local, String base});
@@ -220,6 +221,12 @@ class _AccountWorkspaceState extends State<AccountWorkspace> with WidgetsBinding
           onTap: _busy ? null : () => _open(AssistantScreen(store: _store, accountId: widget.accountId)),
         ),
         ListTile(title: const Text('Мои данные'), onTap: _busy ? null : () => _open(DataScreen(store: _store))),
+        ListTile(
+          title: const Text('Облачные копии'),
+          onTap: _busy ? null : () => _open(HistoryScreen(
+            client: widget.client, accountId: widget.accountId, store: _store,
+          )),
+        ),
         const Divider(),
         Text(_status),
         if (_busy) const LinearProgressIndicator(),
