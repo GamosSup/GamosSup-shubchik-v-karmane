@@ -13,10 +13,12 @@ class GuestStore {
     try {
       return await openDatabase(
         fileName,
-        version: 3,
+        version: 4,
+        onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onUpgrade: (db, oldVersion, _) async {
           if (oldVersion < 2) await _createSyncState(db);
           if (oldVersion < 3) await _createBankFields(db);
+          if (oldVersion < 4) await _createPlannerFields(db);
         },
         onCreate: (db, version) async {
           await _createSyncState(db);
@@ -35,6 +37,7 @@ class GuestStore {
             )
           ''');
           await _createBankFields(db);
+          await _createPlannerFields(db);
         },
       );
     } catch (_) {
@@ -46,9 +49,53 @@ class GuestStore {
   Future<List<Map<String, Object?>>> entries(String table) async =>
       (await database).query(table, orderBy: 'id DESC');
 
-  Future<void> addTask(String title) async {
-    await (await database).insert('tasks', {'title': title});
+  Future<void> addTask(String title, {String? dueOn, String? project}) async {
+    await (await database).insert('tasks', {
+      'title': title, 'due_on': dueOn, 'project': project,
+    });
   }
+
+  Future<void> updateTask(int id, String title, {String? dueOn, String? project}) async {
+    await (await database).update('tasks', {
+      'title': title, 'due_on': dueOn, 'project': project,
+    }, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> _createPlannerFields(Database db) async {
+    await db.execute('ALTER TABLE tasks ADD COLUMN due_on TEXT');
+    await db.execute('ALTER TABLE tasks ADD COLUMN project TEXT');
+    await db.execute('CREATE TABLE habits (id INTEGER PRIMARY KEY, title TEXT NOT NULL)');
+    await db.execute('''
+      CREATE TABLE habit_entries (
+        habit_id INTEGER NOT NULL REFERENCES habits(id) ON DELETE CASCADE,
+        day TEXT NOT NULL,
+        PRIMARY KEY (habit_id, day)
+      )
+    ''');
+  }
+
+  Future<List<Map<String, Object?>>> habitsFor(String day) async =>
+      (await database).rawQuery('''
+        SELECT h.id, h.title,
+          EXISTS(SELECT 1 FROM habit_entries e WHERE e.habit_id = h.id AND e.day = ?) AS done,
+          (SELECT COUNT(*) FROM habit_entries e WHERE e.habit_id = h.id) AS total
+        FROM habits h ORDER BY h.id DESC
+      ''', [day]);
+
+  Future<void> addHabit(String title) async {
+    await (await database).insert('habits', {'title': title});
+  }
+
+  Future<void> setHabitDay(int id, String day, bool done) async {
+    final db = await database;
+    if (done) {
+      await db.insert('habit_entries', {'habit_id': id, 'day': day},
+        conflictAlgorithm: ConflictAlgorithm.ignore);
+    } else {
+      await db.delete('habit_entries', where: 'habit_id = ? AND day = ?', whereArgs: [id, day]);
+    }
+  }
+
 
   Future<void> setDone(int id, bool done) async {
     await (await database).update(
@@ -101,6 +148,8 @@ class GuestStore {
   Future<String> _export(Transaction tx) async => encodeBackup(
     await tx.query('tasks', orderBy: 'id'),
     await tx.query('ledger', orderBy: 'id'),
+    habits: await tx.query('habits', orderBy: 'id'),
+    habitEntries: await tx.query('habit_entries', orderBy: 'habit_id, day'),
   );
 
   Future<void> restoreBackup(String text) async {
@@ -110,13 +159,18 @@ class GuestStore {
   }
 
   Future<void> _replace(Transaction tx, GuestBackup backup) async {
-    await tx.delete('tasks');
-    await tx.delete('ledger');
+    await _clearData(tx);
     for (final row in backup.tasks) {
       await tx.insert('tasks', row);
     }
     for (final row in backup.ledger) {
       await tx.insert('ledger', row);
+    }
+    for (final row in backup.habits) {
+      await tx.insert('habits', row);
+    }
+    for (final row in backup.habitEntries) {
+      await tx.insert('habit_entries', row);
     }
   }
 
@@ -173,10 +227,14 @@ class GuestStore {
 
   Future<void> clear() async {
     final db = await database;
-    await db.transaction((tx) async {
-      await tx.delete('tasks');
-      await tx.delete('ledger');
-    });
+    await db.transaction(_clearData);
+  }
+
+  Future<void> _clearData(Transaction tx) async {
+    await tx.delete('habit_entries');
+    await tx.delete('habits');
+    await tx.delete('tasks');
+    await tx.delete('ledger');
   }
 
 }
@@ -206,9 +264,23 @@ bool validStatementDate(String value) {
 typedef GuestBackup = ({
   List<Map<String, Object?>> tasks,
   List<Map<String, Object?>> ledger,
+  List<Map<String, Object?>> habits,
+  List<Map<String, Object?>> habitEntries,
 });
 
-String encodeBackup(List<Map<String, Object?>> tasks, List<Map<String, Object?>> ledger) {
+String encodeBackup(
+  List<Map<String, Object?>> tasks,
+  List<Map<String, Object?>> ledger, {
+  List<Map<String, Object?>> habits = const [],
+  List<Map<String, Object?>> habitEntries = const [],
+}) {
+  final planned = tasks.map((row) => {
+    'id': row['id'], 'title': row['title'], 'done': row['done'],
+    if (row['due_on'] != null) 'due_on': row['due_on'],
+    if (row['project'] != null) 'project': row['project'],
+  }).toList();
+  final planner = habits.isNotEmpty || habitEntries.isNotEmpty ||
+      planned.any((row) => row.containsKey('due_on') || row.containsKey('project'));
   final money = ledger.map((row) => {
     'id': row['id'], 'title': row['title'], 'cents': row['cents'],
     if (row['source_key'] != null) ...{
@@ -217,16 +289,18 @@ String encodeBackup(List<Map<String, Object?>> tasks, List<Map<String, Object?>>
   }).toList();
   return jsonEncode({
     'format': 'shubchik-guest',
-    'version': money.any((row) => row.containsKey('source_key')) ? 2 : 1,
-    'tasks': tasks,
+    'version': planner ? 3 : money.any((row) => row.containsKey('source_key')) ? 2 : 1,
+    'tasks': planned,
     'ledger': money,
+    if (planner) 'habits': habits,
+    if (planner) 'habit_entries': habitEntries,
   });
 }
 
 GuestBackup decodeBackup(String text) {
   if (text.length > 10000000) throw const FormatException('Слишком большой файл');
   final data = jsonDecode(text);
-  if (data is! Map || data['format'] != 'shubchik-guest' || !const {1, 2}.contains(data['version'])) {
+  if (data is! Map || data['format'] != 'shubchik-guest' || !const {1, 2, 3}.contains(data['version'])) {
     throw const FormatException('Неизвестный формат резервной копии');
   }
 
@@ -250,7 +324,22 @@ GuestBackup decodeBackup(String text) {
           throw const FormatException('Некорректное состояние задачи');
         }
         result['done'] = row['done'];
-      } else {
+        final due = row['due_on'];
+        final project = row['project'];
+        if (due != null) {
+          if (data['version'] != 3 || due is! String || !validStatementDate(due)) {
+            throw const FormatException('Некорректный срок задачи');
+          }
+          result['due_on'] = due;
+        }
+        if (project != null) {
+          if (data['version'] != 3 || project is! String ||
+              project.trim().isEmpty || project.length > 80) {
+            throw const FormatException('Некорректное название проекта');
+          }
+          result['project'] = project;
+        }
+      } else if (table == 'ledger') {
         if (row['cents'] is! int || row['cents'] == 0 ||
             (row['cents'] as int).abs() > 99999999999) {
           throw const FormatException('Некорректная сумма');
@@ -259,7 +348,7 @@ GuestBackup decodeBackup(String text) {
         final source = row['source_key'];
         final date = row['posted_on'];
         if (source != null || date != null) {
-          if (data['version'] != 2 || source is! String ||
+          if (data['version'] == 1 || source is! String ||
               source.isEmpty || source.length > 1024 || !sourceKeys.add(source) ||
               date is! String || !validStatementDate(date)) {
             throw const FormatException('Некорректный идентификатор банковской операции');
@@ -272,5 +361,27 @@ GuestBackup decodeBackup(String text) {
     }).toList();
   }
 
-  return (tasks: rows('tasks'), ledger: rows('ledger'));
+  final tasks = rows('tasks');
+  final ledger = rows('ledger');
+  if (data['version'] != 3) {
+    return (tasks: tasks, ledger: ledger, habits: [], habitEntries: []);
+  }
+  final habits = rows('habits');
+  final ids = habits.map((row) => row['id']).toSet();
+  final entries = data['habit_entries'];
+  if (entries is! List || entries.length > 50000) {
+    throw const FormatException('Некорректный журнал привычек');
+  }
+  final keys = <(int, String)>{};
+  final habitEntries = entries.map<Map<String, Object?>>((row) {
+    if (row is! Map) throw const FormatException('Некорректная отметка привычки');
+    final id = row['habit_id'];
+    final day = row['day'];
+    if (id is! int || !ids.contains(id) || day is! String ||
+        !validStatementDate(day) || !keys.add((id, day))) {
+      throw const FormatException('Некорректная отметка привычки');
+    }
+    return {'habit_id': id, 'day': day};
+  }).toList();
+  return (tasks: tasks, ledger: ledger, habits: habits, habitEntries: habitEntries);
 }

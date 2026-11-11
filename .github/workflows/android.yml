@@ -1,7 +1,7 @@
 name: Android
 on:
   push:
-    branches: [main, android-task-calendar]
+    branches: [main, dated-planner]
   pull_request:
   workflow_dispatch:
 permissions:
