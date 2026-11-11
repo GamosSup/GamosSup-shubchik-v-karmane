@@ -28,6 +28,15 @@ Future<void> main() async {
     // Other modules remain available if the media service cannot start.
   }
   runApp(const ShubchikApp());
+  unawaited(_restoreAuth());
+}
+
+Future<void> _restoreAuth() async {
+  try {
+    await authClient();
+  } catch (_) {
+    // The account screen can retry initialization while guest mode stays usable.
+  }
 }
 
 class ShubchikApp extends StatelessWidget {

@@ -71,6 +71,29 @@ class _AccountScreenState extends State<AccountScreen> {
     }
   }
 
+  Future<void> _sendSignInLink(SupabaseClient client) async {
+    final email = _email.text.trim();
+    if (!email.contains('@')) {
+      setState(() => _status = 'Введите email');
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await client.auth.signInWithOtp(
+        email: email, emailRedirectTo: authRedirect, shouldCreateUser: false,
+      );
+      if (mounted) setState(() {
+        _deleted = false;
+        _status = 'Откройте ссылку из письма на этом телефоне.';
+      });
+    } catch (_) {
+      if (mounted) setState(() => _status =
+          'Не удалось отправить ссылку. Проверьте адрес или попробуйте позже.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _signOut(SupabaseClient client) async {
     setState(() => _busy = true);
     try {
@@ -207,6 +230,7 @@ class _AccountScreenState extends State<AccountScreen> {
                       ),
                       const SizedBox(height: 16),
                       FilledButton(onPressed: _busy ? null : () => _submit(client), child: const Text('Войти')),
+                      TextButton(onPressed: _busy ? null : () => _sendSignInLink(client), child: const Text('Получить ссылку для входа')),
                       TextButton(onPressed: _busy ? null : () => _submit(client, register: true), child: const Text('Создать аккаунт')),
                     ]),
                   ),
