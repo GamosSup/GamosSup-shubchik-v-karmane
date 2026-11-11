@@ -4,6 +4,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'account_screen.dart';
 import 'assistant_screen.dart';
 import 'data_screen.dart';
+import 'focus_screen.dart';
 import 'guest_screen.dart';
 import 'guest_store.dart';
 import 'music_screen.dart';
@@ -66,6 +67,12 @@ class HomeScreen extends StatelessWidget {
           ),
           ListTile(leading: const Icon(Icons.wallet), title: const Text('Финансы'), onTap: () => _open(context, finance: true)),
           ListTile(leading: const Icon(Icons.event), title: const Text('Планировщик'), onTap: () => _open(context, finance: false)),
+          ListTile(
+            leading: const Icon(Icons.timer_outlined), title: const Text('Pomodoro'),
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (_) => FocusScreen(scope: _guest.fileName)),
+            ),
+          ),
           ListTile(
             leading: const Icon(Icons.school), title: const Text('Развитие'),
             onTap: () => Navigator.of(context).push<void>(
