@@ -50,7 +50,18 @@ class GuestStore {
   }
 
   Future<List<Map<String, Object?>>> entries(String table) async =>
-      (await database).query(table, orderBy: 'id DESC');
+      (await database).query(table, orderBy: 'id DESC', columns: table == 'ledger'
+        ? ['id', 'title', 'cents', 'source_key', 'posted_on', 'account', 'category', 'recorded_on', 'receipt_name']
+        : null);
+
+  Future<({String name, Uint8List bytes})?> receiptFor(int id) async {
+    final rows = await (await database).query('ledger',
+      columns: ['receipt_name', 'receipt'], where: 'id = ?', whereArgs: [id]);
+    final row = rows.firstOrNull;
+    final name = row?['receipt_name'];
+    final bytes = row?['receipt'];
+    return name is String && bytes is Uint8List ? (name: name, bytes: bytes) : null;
+  }
 
   Future<void> addTask(String title, {String? dueOn, String? project}) async {
     await (await database).insert('tasks', {
