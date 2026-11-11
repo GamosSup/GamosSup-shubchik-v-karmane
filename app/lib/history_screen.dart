@@ -54,7 +54,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         context: context,
         builder: (context) => AlertDialog(
           title: Text('Восстановить копию за $day?'),
-          content: Text('Задач: ${data.tasks.length}. Операций: ${data.ledger.length}. '
+          content: Text('Задач: ${data.tasks.length}. Привычек: ${data.habits.length}. Операций: ${data.ledger.length}. '
               'Текущие записи аккаунта на телефоне будут заменены. Сначала можно экспортировать их из «Моих данных».'),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Отмена')),
@@ -90,7 +90,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const Text('При первом обновлении за день сохраняется предыдущая версия задач и финансов. Здесь доступно до семи дат.'),
+            const Text('При первом обновлении за день сохраняется предыдущая версия задач, привычек и финансов. Здесь доступно до семи дат.'),
             if (_busy) const LinearProgressIndicator(),
             if (_status.isNotEmpty) Text(_status),
             if (snapshot.data!.isEmpty) const ListTile(title: Text('Облачных копий пока нет')),
