@@ -199,7 +199,11 @@ typedef BankRow = ({String key, String date, String title, int cents});
 
 bool validStatementDate(String value) {
   final date = DateTime.tryParse(value);
-  return RegExp(r'^\d{4}-\d{2}-\d{2}
+  return RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value) &&
+      date != null && date.toIso8601String().startsWith(value + 'T');
+}
+
+typedef GuestBackup = ({
   List<Map<String, Object?>> tasks,
   List<Map<String, Object?>> ledger,
 });
@@ -263,57 +267,6 @@ GuestBackup decodeBackup(String text) {
           result['source_key'] = source;
           result['posted_on'] = date;
         }
-      }
-      return result;
-    }).toList();
-  }
-
-  return (tasks: rows('tasks'), ledger: rows('ledger'));
-}
-).hasMatch(value) &&
-      date != null && date.toIso8601String().startsWith('${value}T');
-}
-
-typedef GuestBackup = ({
-  List<Map<String, Object?>> tasks,
-  List<Map<String, Object?>> ledger,
-});
-
-String encodeBackup(List<Map<String, Object?>> tasks, List<Map<String, Object?>> ledger) =>
-    jsonEncode({'format': 'shubchik-guest', 'version': 1, 'tasks': tasks, 'ledger': ledger});
-
-GuestBackup decodeBackup(String text) {
-  if (text.length > 10000000) throw const FormatException('Слишком большой файл');
-  final data = jsonDecode(text);
-  if (data is! Map || data['format'] != 'shubchik-guest' || data['version'] != 1) {
-    throw const FormatException('Неизвестный формат резервной копии');
-  }
-
-  List<Map<String, Object?>> rows(String table) {
-    final values = data[table];
-    if (values is! List || values.length > 50000) {
-      throw const FormatException('Некорректный список записей');
-    }
-    final ids = <int>{};
-    return values.map<Map<String, Object?>>((row) {
-      if (row is! Map || row['id'] is! int ||
-          row['id'] <= 0 || !ids.add(row['id'] as int) ||
-          row['title'] is! String || (row['title'] as String).trim().isEmpty ||
-          (row['title'] as String).length > 120) {
-        throw const FormatException('Некорректная запись');
-      }
-      final result = <String, Object?>{'id': row['id'], 'title': row['title']};
-      if (table == 'tasks') {
-        if (row['done'] != 0 && row['done'] != 1) {
-          throw const FormatException('Некорректное состояние задачи');
-        }
-        result['done'] = row['done'];
-      } else {
-        if (row['cents'] is! int || row['cents'] == 0 ||
-            (row['cents'] as int).abs() > 99999999999) {
-          throw const FormatException('Некорректная сумма');
-        }
-        result['cents'] = row['cents'];
       }
       return result;
     }).toList();
