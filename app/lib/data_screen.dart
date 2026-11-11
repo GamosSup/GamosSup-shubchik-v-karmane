@@ -69,6 +69,16 @@ class _DataScreenState extends State<DataScreen> {
     return 'Данные восстановлены';
   }
 
+  Future<String> _restoreLocal() async {
+    final text = await widget.store.latestRecoveryPoint();
+    if (text == null) return 'Автоматических копий пока нет';
+    if (!mounted || !await _confirm('Вернуть данные из последней локальной копии?')) {
+      return 'Восстановление отменено';
+    }
+    await widget.store.restoreBackup(text);
+    return 'Локальная копия восстановлена';
+  }
+
   Future<String> _delete() async {
     if (!await _confirm('Удалить все гостевые данные?')) return 'Удаление отменено';
     await widget.store.clear();
@@ -85,6 +95,7 @@ class _DataScreenState extends State<DataScreen> {
         const SizedBox(height: 16),
         FilledButton(onPressed: _busy ? null : () => _run(_export), child: const Text('Сохранить резервную копию')),
         OutlinedButton(onPressed: _busy ? null : () => _run(_restore), child: const Text('Восстановить из файла')),
+        OutlinedButton(onPressed: _busy ? null : () => _run(_restoreLocal), child: const Text('Вернуть последнюю локальную копию')),
         TextButton(onPressed: _busy ? null : () => _run(_delete), child: const Text('Удалить гостевые данные')),
         OutlinedButton(
           onPressed: _busy ? null : () => Navigator.of(context).push<void>(MaterialPageRoute(

@@ -14,7 +14,7 @@ class GuestStore {
     try {
       return await openDatabase(
         fileName,
-        version: 6,
+        version: 7,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onUpgrade: (db, oldVersion, _) async {
           if (oldVersion < 2) await _createSyncState(db);
@@ -22,6 +22,7 @@ class GuestStore {
           if (oldVersion < 4) await _createPlannerFields(db);
           if (oldVersion < 5) await _createFinanceFields(db);
           if (oldVersion < 6) await _createActivityLog(db);
+          if (oldVersion < 7) await _createRecoveryPoints(db);
         },
         onCreate: (db, version) async {
           await _createSyncState(db);
@@ -43,6 +44,7 @@ class GuestStore {
           await _createPlannerFields(db);
           await _createFinanceFields(db);
           await _createActivityLog(db);
+          await _createRecoveryPoints(db);
         },
       );
     } catch (_) {
@@ -96,7 +98,7 @@ class GuestStore {
       }
       final revision = await tx.query('sync_state', columns: ['revision'], limit: 1);
       return {
-        'schema': 6,
+        'schema': 7,
         'counts': counts,
         'cloud_revision': revision.firstOrNull?['revision'] ?? 0,
         'events': await tx.query('activity_log', columns: ['event', 'occurred_at'], orderBy: 'id DESC'),
@@ -280,10 +282,32 @@ class GuestStore {
     financeItems: await tx.query('finance_items', orderBy: 'id'),
   );
 
+  Future<void> _createRecoveryPoints(Database db) => db.execute(
+    'CREATE TABLE recovery_points (id INTEGER PRIMARY KEY, payload TEXT NOT NULL)',
+  );
+
+  Future<String?> latestRecoveryPoint() async {
+    final rows = await (await database).query('recovery_points',
+      columns: ['payload'], orderBy: 'id DESC', limit: 1);
+    return rows.firstOrNull?['payload'] as String?;
+  }
+
+  Future<void> _checkpoint(Transaction tx, String payload) async {
+    if (payload == encodeBackup([], [])) return;
+    await tx.insert('recovery_points', {'payload': payload});
+    await tx.execute(
+      'DELETE FROM recovery_points WHERE id NOT IN '
+      '(SELECT id FROM recovery_points ORDER BY id DESC LIMIT 3)',
+    );
+  }
+
   Future<void> restoreBackup(String text) async {
     final backup = decodeBackup(text);
     final db = await database;
     await db.transaction((tx) async {
+      final current = await _export(tx);
+      if (current == text) return;
+      await _checkpoint(tx, current);
       await _replace(tx, backup);
       await _log(tx, 'data_restored');
     });
@@ -340,6 +364,7 @@ class GuestStore {
     return db.transaction((tx) async {
       if (replaceLocal) {
         if (await _export(tx) != expectedLocal) return false;
+        if (expectedLocal != payload) await _checkpoint(tx, expectedLocal);
         await _replace(tx, backup);
       }
       await tx.insert('sync_state', {
@@ -364,6 +389,7 @@ class GuestStore {
     await db.transaction((tx) async {
       await _clearData(tx);
       await tx.delete('activity_log');
+      await tx.delete('recovery_points');
       await _log(tx, 'data_cleared');
     });
   }
