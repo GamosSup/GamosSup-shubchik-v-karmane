@@ -31,7 +31,7 @@ async function reserve(limit: number): Promise<boolean> {
   return await response.json() === true;
 }
 
-async function askKimi(key: string, model: string, question: string, memory: string) {
+async function askKimi(key: string, question: string, memory: string) {
   const messages = [
     {
       role: "system",
@@ -43,11 +43,15 @@ async function askKimi(key: string, model: string, question: string, memory: str
       content: memory ? `Контекст, которым пользователь решил поделиться:\n${memory}\n\nВопрос:\n${question}` : question,
     },
   ];
-  const response = await fetch("https://api.moonshot.ai/v1/chat/completions", {
+  const response = await fetch("https://agent-gw.kimi.com/coding/v1/chat/completions", {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, max_tokens: 768 }),
-    signal: AbortSignal.timeout(22000),
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      "User-Agent": "Shubchik/0.17",
+    },
+    body: JSON.stringify({ model: "k2d8-preview", messages, max_tokens: 1000, stream: false }),
+    signal: AbortSignal.timeout(65000),
   });
   if (!response.ok) throw new Error("provider_unavailable");
   const data = await response.json();
@@ -64,11 +68,10 @@ Deno.serve(async (request) => {
 
   try {
     if (!await authenticate(authorization)) return json(401, { error: "sign_in" });
-    const key = Deno.env.get("KIMI_API_KEY");
-    const model = Deno.env.get("KIMI_MODEL");
+    const key = Deno.env.get("KIMI_PLUGIN_API_KEY");
     const limit = Number(Deno.env.get("KIMI_MONTHLY_REQUEST_LIMIT"));
     if (
-      Deno.env.get("KIMI_ENABLED") !== "true" || !key || !model || !serverKey ||
+      !key || !serverKey ||
       !Number.isInteger(limit) || limit < 1 || limit > 1000
     ) return json(503, { error: "not_configured" });
 
@@ -86,7 +89,7 @@ Deno.serve(async (request) => {
       return json(400, { error: "invalid_input" });
     }
     if (!await reserve(limit)) return json(429, { error: "monthly_limit" });
-    return json(200, { answer: await askKimi(key, model, question, memory) });
+    return json(200, { answer: await askKimi(key, question, memory) });
   } catch {
     return json(503, { error: "unavailable" });
   }
