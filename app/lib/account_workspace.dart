@@ -83,7 +83,9 @@ class _AccountWorkspaceState extends State<AccountWorkspace> with WidgetsBinding
     final decoded = decodeBackup(jsonEncode(row['payload']));
     return (
       revision: row['revision'] as int,
-      payload: encodeBackup(decoded.tasks, decoded.ledger),
+      payload: encodeBackup(
+        decoded.tasks, decoded.ledger, habits: decoded.habits, habitEntries: decoded.habitEntries,
+      ),
     );
   }
 
