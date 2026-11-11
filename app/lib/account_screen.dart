@@ -55,8 +55,10 @@ class _AccountScreenState extends State<AccountScreen> {
     } catch (_) {
       if (mounted) setState(() => _status = 'Ошибка подключения. Гостевой режим доступен без сети.');
     } finally {
-      _password.clear();
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        _password.clear();
+        setState(() => _busy = false);
+      }
     }
   }
 
