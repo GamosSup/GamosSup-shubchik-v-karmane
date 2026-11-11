@@ -1,7 +1,7 @@
 name: Android
 on:
   push:
-    branches: [main, guest-data-control]
+    branches: [main, secure-email-auth]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -28,6 +28,7 @@ jobs:
       - run: flutter analyze
       - run: flutter test
       - run: flutter create --platforms=android --org io.github.gamossup --no-pub .
+      - run: python3 tool/configure_android.py
       - run: flutter build apk --debug
       - uses: actions/upload-artifact@v4
         with:
