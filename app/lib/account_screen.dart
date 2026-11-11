@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'auth_client.dart';
+import 'account_workspace.dart';
+import 'guest_store.dart';
 
 class AccountScreen extends StatefulWidget {
-  const AccountScreen({super.key});
+  const AccountScreen({super.key, required this.guest});
+  final GuestStore guest;
   @override
   State<AccountScreen> createState() => _AccountScreenState();
 }
@@ -90,10 +93,18 @@ class _AccountScreenState extends State<AccountScreen> {
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                const Text('Гостевые записи хранятся на этом телефоне. Перенос и синхронизация будут доступны после следующего этапа.'),
+                const Text('Данные аккаунта и гостевые записи хранятся отдельно.'),
                 const SizedBox(height: 16),
                 if (user != null) ...[
                   Text(user.email ?? 'Аккаунт'),
+                  FilledButton(
+                    onPressed: _busy ? null : () => Navigator.of(context).push<void>(
+                      MaterialPageRoute(builder: (_) => AccountWorkspace(
+                        client: client, accountId: user.id, guest: widget.guest,
+                      )),
+                    ),
+                    child: const Text('Открыть данные аккаунта'),
+                  ),
                   FilledButton(onPressed: _busy ? null : () => _signOut(client), child: const Text('Выйти')),
                 ] else
                   Form(
