@@ -15,7 +15,7 @@ void main() {
   });
   test('Malformed and unknown backups are rejected', () {
     expect(() => decodeBackup('broken'), throwsFormatException);
-    final data = backup()..['version'] = 2;
+    final data = backup()..['version'] = 99;
     expect(() => decodeBackup(jsonEncode(data)), throwsFormatException);
   });
   test('Duplicate IDs are rejected before restore', () {
