@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'guest_store.dart';
 import 'device_calendar.dart';
+import 'calendar_agenda_screen.dart';
 import 'bank_import_screen.dart';
 import 'habit_screen.dart';
 import 'finance_plans_screen.dart';
@@ -197,6 +198,12 @@ class _GuestScreenState extends State<GuestScreen> {
       appBar: AppBar(
         title: Text(widget.finance ? 'Финансы' : 'Планировщик'),
         actions: [
+          if (!widget.finance) IconButton(
+            tooltip: 'Календарь устройства', icon: const Icon(Icons.calendar_month),
+            onPressed: _saving ? null : () => Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (_) => const CalendarAgendaScreen()),
+            ),
+          ),
           if (!widget.finance) IconButton(
             tooltip: 'Привычки', icon: const Icon(Icons.repeat),
             onPressed: _saving ? null : () => Navigator.of(context).push<void>(
