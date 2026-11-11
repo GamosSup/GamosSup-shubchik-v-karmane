@@ -112,6 +112,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
     if (mounted) _setAnswer('Задача добавлена');
   }
 
+  bool _useOpenRouter = false;
+
   Future<void> _submit() async {
     final question = _prompt.text.trim();
     if (question.isEmpty) {
@@ -131,14 +133,18 @@ class _AssistantScreenState extends State<AssistantScreen> {
     }
     final memory = _sendMemory ? _memory.text.trim() : '';
     final detail = memory.isEmpty ? question : '$question\n\nПамять:\n$memory';
-    if (!await _confirm('Отправить текст в Kimi?', detail) || !mounted) return;
+    final openRouter = _useOpenRouter;
+    final recipient = openRouter ? 'Kimi через OpenRouter' : 'Kimi (Moonshot AI)';
+    if (!await _confirm('Отправить текст в $recipient?', detail) || !mounted) return;
     if (client.auth.currentUser?.id != user.id) {
       _setAnswer('Войдите в аккаунт снова');
       return;
     }
     try {
-      final response = await client.functions.invoke('assistant', body: {
+      final function = openRouter ? 'assistant-openrouter' : 'assistant';
+      final response = await client.functions.invoke(function, body: {
         'question': question,
+        if (openRouter) 'provider': 'openrouter',
         if (memory.isNotEmpty) 'memory': memory,
       });
       if (!mounted) return;
@@ -184,6 +190,12 @@ class _AssistantScreenState extends State<AssistantScreen> {
           subtitle: const Text('Каждую задачу нужно подтвердить'),
           value: _taskPermission,
           onChanged: _busy ? null : (value) => setState(() => _taskPermission = value),
+        ),
+        SwitchListTile(
+          title: const Text('Kimi через OpenRouter'),
+          subtitle: const Text('Бесплатная модель. Запрос передаётся OpenRouter.'),
+          value: _useOpenRouter,
+          onChanged: _busy ? null : (value) => setState(() => _useOpenRouter = value),
         ),
         ExpansionTile(title: const Text('Память помощника'), children: [
           TextField(
