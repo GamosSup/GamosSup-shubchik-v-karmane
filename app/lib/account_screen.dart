@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:sqflite/sqflite.dart' as sqlite;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'auth_client.dart';
 import 'account_workspace.dart';
@@ -18,6 +20,7 @@ class _AccountScreenState extends State<AccountScreen> {
   final _password = TextEditingController();
   bool _busy = false;
   String _status = '';
+  bool _deleted = false;
 
   @override
   void initState() {
@@ -40,14 +43,20 @@ class _AccountScreenState extends State<AccountScreen> {
         final response = await client.auth.signUp(
           email: _email.text.trim(), password: _password.text,
         );
-        if (mounted) setState(() => _status = response.session == null
-            ? 'Проверьте почту для подтверждения аккаунта. После подтверждения войдите.'
-            : 'Аккаунт создан');
+        if (mounted) setState(() {
+          _deleted = false;
+          _status = response.session == null
+              ? 'Проверьте почту для подтверждения аккаунта. После подтверждения войдите.'
+              : 'Аккаунт создан';
+        });
       } else {
         await client.auth.signInWithPassword(
           email: _email.text.trim(), password: _password.text,
         );
-        if (mounted) setState(() => _status = 'Вход выполнен');
+        if (mounted) setState(() {
+          _deleted = false;
+          _status = 'Вход выполнен';
+        });
       }
     } on AuthException {
       if (mounted) setState(() => _status =
@@ -74,6 +83,77 @@ class _AccountScreenState extends State<AccountScreen> {
     }
   }
 
+  Future<void> _deleteAccount(SupabaseClient client, User user) async {
+    final email = user.email;
+    if (email == null || _busy) return;
+    String password = '';
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить аккаунт и облачные копии?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Удаление необратимо. При необходимости сначала сохраните копию. Экспортированные файлы удаляются через «Мои файлы».'),
+            TextField(
+              obscureText: true,
+              onChanged: (value) => password = value,
+              decoration: const InputDecoration(labelText: 'Текущий пароль'),
+            ),
+          ],
+        ),
+        scrollable: true,
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Удалить аккаунт')),
+        ],
+      ),
+    );
+    if (approved != true || !mounted || client.auth.currentUser?.id != user.id) return;
+    if (password.isEmpty) {
+      setState(() => _status = 'Для удаления нужен текущий пароль');
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final session = (await client.auth.signInWithPassword(email: email, password: password)).session;
+      password = '';
+      if (session == null || session.user.id != user.id) throw StateError('Account changed');
+      final response = await client.functions.invoke('delete-account', headers: {
+        'Authorization': 'Bearer ${session.accessToken}',
+      });
+      if (response.data is! Map || response.data['deleted'] != true) {
+        throw StateError('Deletion not confirmed');
+      }
+      if (mounted) setState(() {
+        _deleted = true;
+        _status = 'Аккаунт и облачные копии удалены';
+      });
+      var localCleanup = true;
+      try {
+        await sqlite.deleteDatabase('account_${user.id}.db');
+        await const FlutterSecureStorage().delete(key: 'assistant.memory.${user.id}');
+      } catch (_) {
+        localCleanup = false;
+      }
+      try {
+        await client.auth.signOut(scope: SignOutScope.local);
+      } catch (_) {
+        await const SecureSessionStorage().removePersistedSession();
+      }
+      if (!localCleanup && mounted) {
+        setState(() => _status = 'Аккаунт удалён. Локальную копию очистить не удалось.');
+      }
+    } catch (_) {
+      if (mounted && !_deleted) {
+        setState(() => _status = 'Сервер не подтвердил удаление. Проверьте пароль и подключение.');
+      }
+    } finally {
+      password = '';
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Аккаунт')),
@@ -91,7 +171,7 @@ class _AccountScreenState extends State<AccountScreen> {
         return StreamBuilder<AuthState>(
           stream: client.auth.onAuthStateChange,
           builder: (context, state) {
-            final user = client.auth.currentUser;
+            final user = _deleted ? null : client.auth.currentUser;
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -108,6 +188,7 @@ class _AccountScreenState extends State<AccountScreen> {
                     child: const Text('Открыть данные аккаунта'),
                   ),
                   FilledButton(onPressed: _busy ? null : () => _signOut(client), child: const Text('Выйти')),
+                  TextButton(onPressed: _busy ? null : () => _deleteAccount(client, user), child: const Text('Удалить аккаунт')),
                 ] else
                   Form(
                     key: _form,
