@@ -13,9 +13,10 @@ class GuestStore {
     try {
       return await openDatabase(
         fileName,
-        version: 2,
+        version: 3,
         onUpgrade: (db, oldVersion, _) async {
           if (oldVersion < 2) await _createSyncState(db);
+          if (oldVersion < 3) await _createBankFields(db);
         },
         onCreate: (db, version) async {
           await _createSyncState(db);
@@ -33,6 +34,7 @@ class GuestStore {
               cents INTEGER NOT NULL CHECK (cents != 0)
             )
           ''');
+          await _createBankFields(db);
         },
       );
     } catch (_) {
@@ -56,6 +58,36 @@ class GuestStore {
 
   Future<void> addMoney(String title, int cents) async {
     await (await database).insert('ledger', {'title': title, 'cents': cents});
+  }
+
+  Future<void> _createBankFields(Database db) async {
+    await db.execute('ALTER TABLE ledger ADD COLUMN source_key TEXT');
+    await db.execute('ALTER TABLE ledger ADD COLUMN posted_on TEXT');
+    await db.execute('CREATE UNIQUE INDEX ledger_source_key ON ledger(source_key)');
+  }
+
+  Future<int> importBankRows(List<BankRow> rows) async {
+    final db = await database;
+    return db.transaction((tx) async {
+      var inserted = 0;
+      for (final row in rows) {
+        final previous = await tx.query('ledger', where: 'source_key = ?', whereArgs: [row.key]);
+        if (previous.isNotEmpty) {
+          final record = previous.single;
+          if (record['title'] != row.title || record['cents'] != row.cents ||
+              record['posted_on'] != row.date) {
+            throw const FormatException('Операция с таким ID уже есть, но её данные отличаются');
+          }
+          continue;
+        }
+        await tx.insert('ledger', {
+          'source_key': row.key, 'posted_on': row.date,
+          'title': row.title, 'cents': row.cents,
+        });
+        inserted++;
+      }
+      return inserted;
+    });
   }
 
   Future<void> remove(String table, int id) async {
@@ -161,6 +193,85 @@ String formatMoney(int cents) {
   final value = cents.abs();
   final fraction = (value % 100).toString().padLeft(2, '0');
   return '${cents < 0 ? '−' : ''}${value ~/ 100},$fraction ₽';
+}
+
+typedef BankRow = ({String key, String date, String title, int cents});
+
+bool validStatementDate(String value) {
+  final date = DateTime.tryParse(value);
+  return RegExp(r'^\d{4}-\d{2}-\d{2}
+  List<Map<String, Object?>> tasks,
+  List<Map<String, Object?>> ledger,
+});
+
+String encodeBackup(List<Map<String, Object?>> tasks, List<Map<String, Object?>> ledger) {
+  final money = ledger.map((row) => {
+    'id': row['id'], 'title': row['title'], 'cents': row['cents'],
+    if (row['source_key'] != null) ...{
+      'source_key': row['source_key'], 'posted_on': row['posted_on'],
+    },
+  }).toList();
+  return jsonEncode({
+    'format': 'shubchik-guest',
+    'version': money.any((row) => row.containsKey('source_key')) ? 2 : 1,
+    'tasks': tasks,
+    'ledger': money,
+  });
+}
+
+GuestBackup decodeBackup(String text) {
+  if (text.length > 10000000) throw const FormatException('Слишком большой файл');
+  final data = jsonDecode(text);
+  if (data is! Map || data['format'] != 'shubchik-guest' || !const {1, 2}.contains(data['version'])) {
+    throw const FormatException('Неизвестный формат резервной копии');
+  }
+
+  List<Map<String, Object?>> rows(String table) {
+    final values = data[table];
+    if (values is! List || values.length > 50000) {
+      throw const FormatException('Некорректный список записей');
+    }
+    final ids = <int>{};
+    final sourceKeys = <String>{};
+    return values.map<Map<String, Object?>>((row) {
+      if (row is! Map || row['id'] is! int ||
+          row['id'] <= 0 || !ids.add(row['id'] as int) ||
+          row['title'] is! String || (row['title'] as String).trim().isEmpty ||
+          (row['title'] as String).length > 120) {
+        throw const FormatException('Некорректная запись');
+      }
+      final result = <String, Object?>{'id': row['id'], 'title': row['title']};
+      if (table == 'tasks') {
+        if (row['done'] != 0 && row['done'] != 1) {
+          throw const FormatException('Некорректное состояние задачи');
+        }
+        result['done'] = row['done'];
+      } else {
+        if (row['cents'] is! int || row['cents'] == 0 ||
+            (row['cents'] as int).abs() > 99999999999) {
+          throw const FormatException('Некорректная сумма');
+        }
+        result['cents'] = row['cents'];
+        final source = row['source_key'];
+        final date = row['posted_on'];
+        if (source != null || date != null) {
+          if (data['version'] != 2 || source is! String ||
+              source.isEmpty || source.length > 1024 || !sourceKeys.add(source) ||
+              date is! String || !validStatementDate(date)) {
+            throw const FormatException('Некорректный идентификатор банковской операции');
+          }
+          result['source_key'] = source;
+          result['posted_on'] = date;
+        }
+      }
+      return result;
+    }).toList();
+  }
+
+  return (tasks: rows('tasks'), ledger: rows('ledger'));
+}
+).hasMatch(value) &&
+      date != null && date.toIso8601String().startsWith('${value}T');
 }
 
 typedef GuestBackup = ({
