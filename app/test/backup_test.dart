@@ -21,7 +21,7 @@ void main() {
   test('Duplicate IDs are rejected before restore', () {
     final data = backup();
     final tasks = data['tasks'] as List;
-    tasks.add(Map.of(tasks.first as Map));
+    tasks.add(tasks.first);
     expect(() => decodeBackup(jsonEncode(data)), throwsFormatException);
   });
   test('Fractional currency and invalid task state are rejected', () {
