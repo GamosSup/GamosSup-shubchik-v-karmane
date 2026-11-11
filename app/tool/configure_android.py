@@ -26,9 +26,19 @@ ET.SubElement(tts, "action", {f"{{{namespace}}}name": "android.intent.action.TTS
 recognition = ET.SubElement(queries, "intent")
 ET.SubElement(recognition, "action", {f"{{{namespace}}}name": "android.speech.RecognitionService"})
 ET.SubElement(root, "uses-permission", {f"{{{namespace}}}name": "android.permission.RECORD_AUDIO"})
+for permission in ("android.permission.POST_NOTIFICATIONS", "android.permission.RECEIVE_BOOT_COMPLETED"):
+    ET.SubElement(root, "uses-permission", {f"{{{namespace}}}name": permission})
+receiver = ET.SubElement(application, "receiver", {
+    f"{{{namespace}}}name": ".ReminderReceiver",
+    f"{{{namespace}}}exported": "false",
+})
+boot = ET.SubElement(receiver, "intent-filter")
+ET.SubElement(boot, "action", {f"{{{namespace}}}name": "android.intent.action.BOOT_COMPLETED"})
 tree.write(path, encoding="utf-8", xml_declaration=True)
 
 activity = Path("android/app/src/main/kotlin/io/github/gamossup/shubchik/MainActivity.kt")
 if not activity.is_file():
     raise FileNotFoundError(f"Missing Android activity: {activity}")
 activity.write_bytes(Path("tool/MainActivity.kt").read_bytes())
+
+activity.with_name("ReminderReceiver.kt").write_bytes(Path("tool/ReminderReceiver.kt").read_bytes())
