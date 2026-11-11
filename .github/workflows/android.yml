@@ -1,7 +1,7 @@
 name: Android
 on:
   push:
-    branches: [main, dated-planner]
+    branches: [main, android-reminders]
   pull_request:
   workflow_dispatch:
 permissions:
