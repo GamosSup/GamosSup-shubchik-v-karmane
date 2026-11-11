@@ -170,7 +170,7 @@ class GuestStore {
     await db.execute('CREATE UNIQUE INDEX ledger_source_key ON ledger(source_key)');
   }
 
-  Future<int> importBankRows(List<BankRow> rows) async {
+  Future<int> importBankRows(List<BankRow> rows, {String? account}) async {
     final db = await database;
     return db.transaction((tx) async {
       var inserted = 0;
@@ -188,6 +188,7 @@ class GuestStore {
           'source_key': row.key, 'posted_on': row.date,
           'title': row.title, 'cents': row.cents,
           'category': suggestCategory(row.title, row.cents),
+          'account': account,
         });
         inserted++;
       }
