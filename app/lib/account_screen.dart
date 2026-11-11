@@ -43,14 +43,20 @@ class _AccountScreenState extends State<AccountScreen> {
         final response = await client.auth.signUp(
           email: _email.text.trim(), password: _password.text,
         );
-        if (mounted) setState(() => _status = response.session == null
-            ? 'Проверьте почту для подтверждения аккаунта. После подтверждения войдите.'
-            : 'Аккаунт создан');
+        if (mounted) setState(() {
+          _deleted = false;
+          _status = response.session == null
+              ? 'Проверьте почту для подтверждения аккаунта. После подтверждения войдите.'
+              : 'Аккаунт создан';
+        });
       } else {
         await client.auth.signInWithPassword(
           email: _email.text.trim(), password: _password.text,
         );
-        if (mounted) setState(() => _status = 'Вход выполнен');
+        if (mounted) setState(() {
+          _deleted = false;
+          _status = 'Вход выполнен';
+        });
       }
     } on AuthException {
       if (mounted) setState(() => _status =
