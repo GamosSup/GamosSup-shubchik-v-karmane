@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'guest_screen.dart';
+import 'guest_store.dart';
+
 void main() => runApp(const ShubchikApp());
 
 class ShubchikApp extends StatelessWidget {
@@ -26,6 +29,14 @@ class ShubchikApp extends StatelessWidget {
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
+  static final _guest = GuestStore();
+
+  void _open(BuildContext context, {required bool finance}) {
+    Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => GuestScreen(store: _guest, finance: finance),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -33,11 +44,11 @@ class HomeScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text('Разделы в разработке', style: Theme.of(context).textTheme.titleLarge),
-          const ListTile(leading: Icon(Icons.music_note), title: Text('Музыка')),
-          const ListTile(leading: Icon(Icons.wallet), title: Text('Финансы')),
-          const ListTile(leading: Icon(Icons.event), title: Text('Планировщик')),
-          const ListTile(leading: Icon(Icons.school), title: Text('Развитие')),
+          Text('Гостевой режим · данные на телефоне', style: Theme.of(context).textTheme.titleLarge),
+          const ListTile(leading: Icon(Icons.music_note), title: Text('Музыка'), subtitle: Text('В разработке')),
+          ListTile(leading: const Icon(Icons.wallet), title: const Text('Финансы'), onTap: () => _open(context, finance: true)),
+          ListTile(leading: const Icon(Icons.event), title: const Text('Планировщик'), onTap: () => _open(context, finance: false)),
+          const ListTile(leading: Icon(Icons.school), title: Text('Развитие'), subtitle: Text('В разработке')),
         ],
       ),
     );
