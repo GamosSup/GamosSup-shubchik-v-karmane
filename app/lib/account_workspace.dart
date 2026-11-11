@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'assistant_screen.dart';
 import 'data_screen.dart';
 import 'guest_screen.dart';
 import 'guest_store.dart';
@@ -214,6 +215,10 @@ class _AccountWorkspaceState extends State<AccountWorkspace> with WidgetsBinding
       children: [
         ListTile(title: const Text('Планировщик'), onTap: _busy ? null : () => _open(GuestScreen(store: _store, finance: false))),
         ListTile(title: const Text('Финансы'), onTap: _busy ? null : () => _open(GuestScreen(store: _store, finance: true))),
+        ListTile(
+          title: const Text('Помощник'),
+          onTap: _busy ? null : () => _open(AssistantScreen(store: _store, accountId: widget.accountId)),
+        ),
         ListTile(title: const Text('Мои данные'), onTap: _busy ? null : () => _open(DataScreen(store: _store))),
         const Divider(),
         Text(_status),
