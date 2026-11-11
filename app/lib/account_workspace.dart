@@ -84,7 +84,8 @@ class _AccountWorkspaceState extends State<AccountWorkspace> with WidgetsBinding
     return (
       revision: row['revision'] as int,
       payload: encodeBackup(
-        decoded.tasks, decoded.ledger, habits: decoded.habits, habitEntries: decoded.habitEntries,
+        decoded.tasks, decoded.ledger, habits: decoded.habits,
+        habitEntries: decoded.habitEntries, financeItems: decoded.financeItems,
       ),
     );
   }
