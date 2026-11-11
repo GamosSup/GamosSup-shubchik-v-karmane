@@ -157,7 +157,16 @@ class _AccountWorkspaceState extends State<AccountWorkspace> with WidgetsBinding
     try {
       final current = await _store.readSyncState();
       if (current.local != conflict.local.local) throw StateError('Local changed');
-      final payload = useRemote ? conflict.remote.payload : current.local;
+      final remote = await _readRemote();
+      if (!mounted || !_sameAccount) return;
+      if (remote != conflict.remote) {
+        setState(() {
+          _conflict = null;
+          _status = 'Облачная версия изменилась. Обновите данные перед выбором.';
+        });
+        return;
+      }
+      final payload = useRemote ? remote.payload : current.local;
       final revision = useRemote ? conflict.remote.revision : await _push(payload, conflict.remote.revision);
       if (!mounted || !_sameAccount) return;
       final accepted = await _store.acceptSync(
