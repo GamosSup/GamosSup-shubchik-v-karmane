@@ -23,4 +23,7 @@ if queries is None:
     queries = ET.SubElement(root, "queries")
 tts = ET.SubElement(queries, "intent")
 ET.SubElement(tts, "action", {f"{{{namespace}}}name": "android.intent.action.TTS_SERVICE"})
+recognition = ET.SubElement(queries, "intent")
+ET.SubElement(recognition, "action", {f"{{{namespace}}}name": "android.speech.RecognitionService"})
+ET.SubElement(root, "uses-permission", {f"{{{namespace}}}name": "android.permission.RECORD_AUDIO"})
 tree.write(path, encoding="utf-8", xml_declaration=True)
