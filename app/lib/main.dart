@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'account_screen.dart';
@@ -32,10 +33,49 @@ class ShubchikApp extends StatelessWidget {
   }
 }
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
   static final _guest = GuestStore();
+  static const _widgetChannel = MethodChannel('shubchik/widget');
+
+  @override
+  void initState() {
+    super.initState();
+    _widgetChannel.setMethodCallHandler((call) async {
+      if (call.method == 'openSection') _openWidgetSection(call.arguments);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _readWidgetLaunch());
+  }
+
+  @override
+  void dispose() {
+    _widgetChannel.setMethodCallHandler(null);
+    super.dispose();
+  }
+
+  Future<void> _readWidgetLaunch() async {
+    try {
+      _openWidgetSection(await _widgetChannel.invokeMethod<String>('getInitialSection'));
+    } on MissingPluginException {
+      // The home-screen widget is available on Android builds.
+    }
+  }
+
+  void _openWidgetSection(Object? section) {
+    if (!mounted) return;
+    if (section == 'planner') _open(context, finance: false);
+    if (section == 'focus') {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => FocusScreen(scope: _guest.fileName),
+      ));
+    }
+  }
 
   void _open(BuildContext context, {required bool finance}) {
     Navigator.of(context).push<void>(MaterialPageRoute(
