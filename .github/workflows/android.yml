@@ -29,6 +29,8 @@ jobs:
       - run: flutter test
       - run: flutter create --platforms=android --org io.github.gamossup --no-pub .
       - run: python3 tool/configure_android.py
+      - run: ./gradlew :app:testDebugUnitTest
+        working-directory: app/android
       - run: flutter build apk --debug
       - uses: actions/upload-artifact@v4
         with:
