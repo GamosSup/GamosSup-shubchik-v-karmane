@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -62,6 +63,72 @@ class _MusicScreenState extends State<MusicScreen> {
   bool _busy = false;
   bool _recent = false;
   String _query = '';
+
+  final _recordings = <String, List<Map<String, dynamic>>>{};
+  static DateTime? _lastLookup;
+
+  Future<void> _searchMusicBrainz() async {
+    final query = _query;
+    var recordings = _recordings[query];
+    if (recordings == null) {
+      final lastLookup = _lastLookup;
+      if (lastLookup != null &&
+          DateTime.now().difference(lastLookup) < const Duration(seconds: 1)) {
+        _message('Повторите поиск через секунду');
+        return;
+      }
+      _lastLookup = DateTime.now();
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+      try {
+        final url = Uri.https('musicbrainz.org', '/ws/2/recording', {
+          'query': query, 'fmt': 'json', 'limit': '8',
+        });
+        final request = await client.getUrl(url);
+        request.headers.set(HttpHeaders.userAgentHeader,
+            'Shubchik/0.17 (https://github.com/GamosSup/GamosSup-shubchik-v-karmane)');
+        final response = await request.close().timeout(const Duration(seconds: 10));
+        if (response.statusCode != 200) {
+          if (mounted) _message('MusicBrainz временно недоступен');
+          return;
+        }
+        final data = jsonDecode(await response.transform(utf8.decoder).join()
+            .timeout(const Duration(seconds: 10))) as Map<String, dynamic>;
+        recordings = (data['recordings'] as List).cast<Map<String, dynamic>>();
+        if (_recordings.length >= 32) _recordings.remove(_recordings.keys.first);
+        _recordings[query] = recordings;
+      } finally {
+        client.close(force: true);
+      }
+    }
+    if (!mounted) return;
+    final results = recordings;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Записи в MusicBrainz'),
+        content: results.isEmpty
+            ? const Text('Записи не найдены')
+            : SizedBox(
+                width: 360,
+                child: ListView(shrinkWrap: true, children: [
+                  for (final recording in results)
+                    ListTile(
+                      title: Text(recording['title'] as String),
+                      subtitle: Text((recording['artist-credit'] as List? ?? [])
+                          .map((credit) => credit['name']).join(', ')),
+                      onTap: () => launchUrl(
+                        Uri.https('musicbrainz.org', '/recording/${recording['id']}'),
+                        mode: LaunchMode.externalApplication,
+                      ),
+                    ),
+                ]),
+              ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Закрыть')),
+        ],
+      ),
+    );
+  }
 
   Future<void> _searchYandex() async {
     final uri = Uri.https('music.yandex.ru', '/search', {'text': _query});
@@ -419,6 +486,11 @@ class _MusicScreenState extends State<MusicScreen> {
               onPressed: _busy ? null : () => _perform(_searchYandex),
               icon: const Icon(Icons.open_in_new),
               label: const Text('Искать в Яндекс Музыке'),
+            ),
+          if (_query.isNotEmpty)
+            OutlinedButton(
+              onPressed: _busy ? null : () => _perform(_searchMusicBrainz),
+              child: const Text('Найти запись в MusicBrainz'),
             ),
           if (_busy) const LinearProgressIndicator(),
           if (snapshot.hasError) const Text('Не удалось открыть локальную библиотеку'),
