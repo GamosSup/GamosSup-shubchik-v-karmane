@@ -1,6 +1,6 @@
 name: shubchik
 publish_to: none
-version: 0.17.0+17
+version: 0.18.0+18
 environment:
   sdk: '>=3.8.0 <4.0.0'
 dependencies:
