@@ -192,6 +192,45 @@ class _GuestScreenState extends State<GuestScreen> {
     }
   }
 
+  Widget _expenseChart(List<Map<String, Object?>> rows) {
+    final totals = <String, int>{};
+    for (final row in rows) {
+      final cents = row['cents'] as int;
+      if (cents >= 0) continue;
+      final category = (row['category'] as String?)?.trim();
+      totals.update(
+        category == null || category.isEmpty ? 'Без категории' : category,
+        (total) => total - cents,
+        ifAbsent: () => -cents,
+      );
+    }
+    if (totals.isEmpty) return const SizedBox.shrink();
+    final categories = totals.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return ExpansionTile(
+      title: const Text('Расходы по категориям'),
+      childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      children: [
+        for (final category in categories)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('${category.key} · ${formatMoney(category.value)}'),
+                const SizedBox(height: 4),
+                ExcludeSemantics(
+                  child: LinearProgressIndicator(
+                    value: category.value / categories.first.value,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -260,6 +299,7 @@ class _GuestScreenState extends State<GuestScreen> {
                   children: [
                     if (!widget.finance) _filters(allRows),
                     ListTile(title: Text(summary), subtitle: const Text('На этом устройстве')),
+                    if (widget.finance) _expenseChart(rows),
                   ],
                 );
               }
