@@ -9,6 +9,8 @@ import 'package:just_audio_background/just_audio_background.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'track_metadata.dart';
+
 class MusicScreen extends StatefulWidget {
   const MusicScreen({super.key});
 
@@ -67,8 +69,8 @@ class _MusicScreenState extends State<MusicScreen> {
   final _recordings = <String, List<Map<String, dynamic>>>{};
   static DateTime? _lastLookup;
 
-  Future<void> _searchMusicBrainz() async {
-    final query = _query;
+  Future<void> _searchMusicBrainz({String? text}) async {
+    final query = text ?? _query;
     var recordings = _recordings[query];
     if (recordings == null) {
       final lastLookup = _lastLookup;
@@ -128,6 +130,66 @@ class _MusicScreenState extends State<MusicScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _importTrackList() async {
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.custom, allowedExtensions: ['csv', 'json'],
+    );
+    if (picked == null || !mounted) return;
+    final file = picked.files.single;
+    if (file.path == null || file.size > 262144) {
+      _message('Выберите CSV или JSON размером до 256 КБ');
+      return;
+    }
+    final List<TrackMetadata> tracks;
+    try {
+      tracks = parseTrackList(await File(file.path!).readAsString(),
+          json: file.extension?.toLowerCase() == 'json');
+    } on FormatException catch (error) {
+      if (mounted) _message(error.message);
+      return;
+    }
+    final local = await (await _library).query('tracks', columns: ['title']);
+    final fileNames = local.map((row) => trackFileKey(
+        (row['title'] as String).replaceFirst(RegExp(r'\.[a-zA-Z0-9]{2,5}$'), ''))).toSet();
+    final missing = tracks.where((track) => !hasMatchingTrackFile(track, fileNames)).toList();
+    if (!mounted) return;
+    final selected = await showDialog<TrackMetadata>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Сверка списка с локальными файлами'),
+        content: SizedBox(
+          width: 360,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('Совпало по имени файла: ${tracks.length - missing.length} из ${tracks.length}'),
+            if (missing.isNotEmpty) ...[
+              const Text('Выберите трек без совпадения для поиска в MusicBrainz.'),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: missing.length,
+                  itemBuilder: (context, index) {
+                    final track = missing[index];
+                    return ListTile(
+                      title: Text(track.title),
+                      subtitle: Text(track.artist),
+                      onTap: () => Navigator.pop(context, track),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Закрыть')),
+        ],
+      ),
+    );
+    if (selected != null && mounted) {
+      await _searchMusicBrainz(text: '${selected.artist} ${selected.title}');
+    }
   }
 
   Future<void> _searchYandex() async {
@@ -492,6 +554,10 @@ class _MusicScreenState extends State<MusicScreen> {
               onPressed: _busy ? null : () => _perform(_searchMusicBrainz),
               child: const Text('Найти запись в MusicBrainz'),
             ),
+          OutlinedButton(
+            onPressed: _busy ? null : () => _perform(_importTrackList),
+            child: const Text('Сверить список треков из CSV или JSON'),
+          ),
           if (_busy) const LinearProgressIndicator(),
           if (snapshot.hasError) const Text('Не удалось открыть локальную библиотеку'),
           if (snapshot.hasData)
