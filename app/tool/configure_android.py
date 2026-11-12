@@ -102,3 +102,4 @@ for resource in Path("tool/widget").glob("*/*.xml"):
     destination.write_bytes(resource.read_bytes())
 
 activity.with_name('BankNotificationListener.kt').write_bytes(Path('tool/BankNotificationListener.kt').read_bytes())
+activity.with_name('BackupCipher.kt').write_bytes(Path('tool/BackupCipher.kt').read_bytes())

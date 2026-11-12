@@ -54,6 +54,31 @@ class MainActivity : AudioServiceActivity() {
                     else -> result.notImplemented()
                 }
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "shubchik/backup_crypto")
+            .setMethodCallHandler { call, result ->
+                val encrypt = when (call.method) {
+                    "encrypt" -> true
+                    "decrypt" -> false
+                    else -> {
+                        result.notImplemented()
+                        return@setMethodCallHandler
+                    }
+                }
+                val input = call.argument<ByteArray>("bytes")
+                val password = call.argument<String>("password")
+                if (input == null || password == null) {
+                    result.error("backup_crypto", "Missing backup or passphrase", null)
+                    return@setMethodCallHandler
+                }
+                Thread {
+                    try {
+                        val output = BackupCipher.apply(input, password, encrypt)
+                        runOnUiThread { result.success(output) }
+                    } catch (_: Exception) {
+                        runOnUiThread { result.error("backup_crypto", "Backup could not be processed", null) }
+                    }
+                }.start()
+            }
         widgetChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "shubchik/widget")
         widgetChannel?.setMethodCallHandler { call, result ->
             if (call.method == "getInitialSection") {
