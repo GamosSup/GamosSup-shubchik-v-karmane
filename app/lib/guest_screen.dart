@@ -3,6 +3,7 @@ import 'guest_store.dart';
 import 'device_calendar.dart';
 import 'calendar_agenda_screen.dart';
 import 'bank_import_screen.dart';
+import 'bank_notifications_screen.dart';
 import 'habit_screen.dart';
 import 'finance_plans_screen.dart';
 import 'receipt_screen.dart';
@@ -254,6 +255,15 @@ class _GuestScreenState extends State<GuestScreen> {
             onPressed: _saving ? null : () async {
               await Navigator.of(context).push<void>(MaterialPageRoute(
                 builder: (_) => FinancePlansScreen(store: widget.store),
+              ));
+              if (mounted) _refresh();
+            },
+          ),
+          if (widget.finance && widget.store.fileName == 'shubchik_guest.db') IconButton(
+            tooltip: 'Банковские уведомления', icon: const Icon(Icons.notifications_outlined),
+            onPressed: _saving ? null : () async {
+              await Navigator.of(context).push<void>(MaterialPageRoute(
+                builder: (_) => BankNotificationsScreen(store: widget.store),
               ));
               if (mounted) _refresh();
             },
