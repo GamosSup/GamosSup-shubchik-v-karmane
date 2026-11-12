@@ -77,6 +77,15 @@ buttons = ET.SubElement(application, "receiver", {
 })
 media = ET.SubElement(buttons, "intent-filter")
 ET.SubElement(media, "action", {f"{{{namespace}}}name": "android.intent.action.MEDIA_BUTTON"})
+bank_listener = ET.SubElement(application, "service", {
+    f"{{{namespace}}}name": ".BankNotificationListener",
+    f"{{{namespace}}}exported": "false",
+    f"{{{namespace}}}permission": "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",
+})
+bank_listener_filter = ET.SubElement(bank_listener, "intent-filter")
+ET.SubElement(bank_listener_filter, "action", {
+    f"{{{namespace}}}name": "android.service.notification.NotificationListenerService",
+})
 tree.write(path, encoding="utf-8", xml_declaration=True)
 
 activity = Path("android/app/src/main/kotlin/io/github/gamossup/shubchik/MainActivity.kt")
@@ -91,3 +100,5 @@ for resource in Path("tool/widget").glob("*/*.xml"):
     destination = Path("android/app/src/main/res") / resource.parent.name / resource.name
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(resource.read_bytes())
+
+activity.with_name('BankNotificationListener.kt').write_bytes(Path('tool/BankNotificationListener.kt').read_bytes())

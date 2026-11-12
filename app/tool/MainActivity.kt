@@ -19,6 +19,41 @@ class MainActivity : AudioServiceActivity() {
     private var pendingCalendarResult: MethodChannel.Result? = null
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "shubchik/bank_notifications")
+            .setMethodCallHandler { call, result ->
+                val prefs = getSharedPreferences("bank_notification_candidates", MODE_PRIVATE)
+                when (call.method) {
+                    "read" -> result.success(mapOf(
+                        "enabled" to prefs.getBoolean("enabled", false),
+                        "items" to prefs.getString("items", "[]"),
+                    ))
+                    "enable" -> {
+                        try {
+                            startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                            prefs.edit().putBoolean("enabled", true).apply()
+                            result.success(null)
+                        } catch (_: ActivityNotFoundException) {
+                            result.error("settings_unavailable", "Notification access settings unavailable", null)
+                        }
+                    }
+                    "disable" -> {
+                        prefs.edit().clear().apply()
+                        result.success(null)
+                    }
+                    "dismiss" -> {
+                        val id = call.argument<String>("id")
+                        val previous = org.json.JSONArray(prefs.getString("items", "[]"))
+                        val remaining = org.json.JSONArray()
+                        for (index in 0 until previous.length()) {
+                            val item = previous.getJSONObject(index)
+                            if (item.getString("id") != id) remaining.put(item)
+                        }
+                        prefs.edit().putString("items", remaining.toString()).apply()
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         widgetChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "shubchik/widget")
         widgetChannel?.setMethodCallHandler { call, result ->
             if (call.method == "getInitialSection") {
