@@ -102,3 +102,12 @@ for resource in Path("tool/widget").glob("*/*.xml"):
     destination.write_bytes(resource.read_bytes())
 
 activity.with_name('BankNotificationListener.kt').write_bytes(Path('tool/BankNotificationListener.kt').read_bytes())
+activity.with_name('BackupCipher.kt').write_bytes(Path('tool/BackupCipher.kt').read_bytes())
+
+test_dir = Path("android/app/src/test/kotlin/io/github/gamossup/shubchik")
+test_dir.mkdir(parents=True, exist_ok=True)
+for test in Path("tool/native_tests").glob("*.kt"):
+    (test_dir / test.name).write_bytes(test.read_bytes())
+gradle = Path("android/app/build.gradle.kts")
+with gradle.open("a", encoding="utf-8") as output:
+    output.write('\ndependencies { testImplementation("junit:junit:4.13.2") }\n')
